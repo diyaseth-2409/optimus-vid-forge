@@ -9,6 +9,7 @@ import {
   ArrowRight,
   Sparkles,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { OptimusLogo } from "@/components/OptimusLogo";
 import { ContentSourceCard } from "@/components/ContentSourceCard";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ export function ContentSourceSelection({ onSelect }: ContentSourceSelectionProps
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <OptimusLogo />
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="text-sm text-muted-foreground hidden sm:block">Times of India</span>
             <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
               <span className="text-xs font-medium text-secondary-foreground">TI</span>

@@ -4,6 +4,7 @@ import { ArrowLeft, Search, Filter, Clock, RefreshCw } from "lucide-react";
 import { OptimusLogo } from "@/components/OptimusLogo";
 import { ArticleCard } from "@/components/ArticleCard";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Input } from "@/components/ui/input";
 
 interface ArticleSelectionProps {
@@ -88,6 +89,7 @@ export function ArticleSelection({ onBack, onContinue }: ArticleSelectionProps) 
             <OptimusLogo />
           </div>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="text-sm text-muted-foreground">
               {selectedArticles.length} selected
             </span>
