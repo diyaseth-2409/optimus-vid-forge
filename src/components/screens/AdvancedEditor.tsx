@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Moon,
   Trash2,
   Copy,
   Scissors,
@@ -34,6 +35,7 @@ import { OptimusLogo } from "@/components/OptimusLogo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface AdvancedEditorProps {
   onBack: () => void;
@@ -77,6 +79,8 @@ export function AdvancedEditor({ onBack }: AdvancedEditorProps) {
 
           {/* Center tools */}
           <div className="flex items-center gap-1 px-3 py-1 rounded-lg bg-secondary/50">
+            <ThemeToggle />
+            <div className="w-px h-6 bg-border mx-1" />
             <Button variant="ghost" size="icon" className="w-8 h-8">
               <Undo className="w-4 h-4" />
             </Button>

@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { OptimusLogo } from "@/components/OptimusLogo";
 import { SlidePreview } from "@/components/SlidePreview";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ export function PreviewEditMode({ onBack, onAdvancedEdit }: PreviewEditModeProps
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button variant="outline" size="sm" className="gap-2">
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Download</span>
