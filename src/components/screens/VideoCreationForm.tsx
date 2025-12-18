@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -9,14 +9,59 @@ import {
   Upload,
   Wand2,
   Video,
+  Sun,
+  Moon,
+  Check,
+  Search,
+  Send,
+  Edit2,
+  Save,
+  X,
+  Plus,
+  Minus,
+  Play,
+  Pause,
+  SkipForward,
+  SkipBack,
+  ChevronLeft,
+  ChevronRight,
+  Volume2,
+  VolumeX,
+  ArrowDown,
+  ArrowUp,
+  Settings,
+  Maximize,
+  Scissors,
+  Calendar,
+  RotateCcw,
+  GripVertical,
+  Palette,
 } from "lucide-react";
-import { OptimusLogo } from "@/components/OptimusLogo";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { cn } from "@/lib/utils";
 import { ThemeCard } from "@/components/ThemeCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { useTheme } from "@/components/ThemeProvider";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -24,6 +69,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { ColorPicker } from "@/components/ui/color-picker";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
 interface VideoCreationFormProps {
   onBack: () => void;
@@ -33,33 +96,2529 @@ interface VideoCreationFormProps {
 
 type FormatOption = "16:9" | "9:16" | "both";
 
+const steps = [
+  { id: 1, label: "METADATA", key: "metadata" },
+  { id: 2, label: "TEMPLATE", key: "template" },
+  { id: 3, label: "BG AUDIO", key: "bgAudio" },
+  { id: 4, label: "Preview and Quick Edits", key: "horizontalPreview" },
+  { id: 5, label: "Final Output", key: "finalOutput" },
+];
+
+// Predefined caption styles
+const captionStyles = [
+  { 
+    id: "default", 
+    name: "Default", 
+    backgroundColor: "rgba(0, 0, 0, 0.7)", 
+    textColor: "#FFFFFF", 
+    fontFamily: "Inter",
+    description: "Dark background, white text"
+  },
+  { 
+    id: "news-bold", 
+    name: "News Bold", 
+    backgroundColor: "#000000", 
+    textColor: "#FFFFFF", 
+    fontFamily: "Times New Roman",
+    description: "Black background, bold white text"
+  },
+  { 
+    id: "elegant", 
+    name: "Elegant", 
+    backgroundColor: "rgba(255, 255, 255, 0.9)", 
+    textColor: "#1a1a1a", 
+    fontFamily: "Georgia",
+    description: "White background, dark text"
+  },
+  { 
+    id: "modern", 
+    name: "Modern", 
+    backgroundColor: "rgba(59, 130, 246, 0.9)", 
+    textColor: "#FFFFFF", 
+    fontFamily: "Roboto",
+    description: "Blue background, white text"
+  },
+  { 
+    id: "minimal", 
+    name: "Minimal", 
+    backgroundColor: "transparent", 
+    textColor: "#FFFFFF", 
+    fontFamily: "Inter",
+    description: "No background, white text"
+  },
+  { 
+    id: "vibrant", 
+    name: "Vibrant", 
+    backgroundColor: "rgba(139, 92, 246, 0.9)", 
+    textColor: "#FFFFFF", 
+    fontFamily: "Poppins",
+    description: "Purple background, white text"
+  },
+  { 
+    id: "classic", 
+    name: "Classic", 
+    backgroundColor: "rgba(0, 0, 0, 0.85)", 
+    textColor: "#FFD700", 
+    fontFamily: "Playfair Display",
+    description: "Dark background, gold text"
+  },
+  { 
+    id: "clean", 
+    name: "Clean", 
+    backgroundColor: "rgba(255, 255, 255, 0.95)", 
+    textColor: "#000000", 
+    fontFamily: "Helvetica",
+    description: "White background, black text"
+  },
+];
+
 const themes = [
-  { id: "1", name: "Breaking News", preview: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=225&fit=crop" },
-  { id: "2", name: "Modern Clean", preview: "https://images.unsplash.com/photo-1557683316-973673baf926?w=400&h=225&fit=crop" },
-  { id: "3", name: "Bold Headlines", preview: "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400&h=225&fit=crop" },
-  { id: "4", name: "Minimal Dark", preview: "https://images.unsplash.com/photo-1614850523296-d8c1af93d400?w=400&h=225&fit=crop" },
+  { id: "1", name: "Breaking News", preview: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=225&fit=crop", category: "Previously Used" },
+  { id: "2", name: "Modern Clean", preview: "https://images.unsplash.com/photo-1557683316-973673baf926?w=400&h=225&fit=crop", category: "AI Recommended" },
+  { id: "3", name: "Bold Headlines", preview: "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400&h=225&fit=crop", category: "AI Recommended" },
+  { id: "4", name: "Minimal Dark", preview: "https://images.unsplash.com/photo-1614850523296-d8c1af93d400?w=400&h=225&fit=crop", category: "All" },
+  { id: "5", name: "Times of India", preview: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=225&fit=crop", category: "Previously Used" },
+  { id: "6", name: "Economic Times", preview: "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop", category: "All" },
+  { id: "7", name: "News Classic", preview: "https://images.unsplash.com/photo-1495020689067-958852a7765e?w=400&h=225&fit=crop", category: "Previously Used" },
+  { id: "8", name: "Business News", preview: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&h=225&fit=crop", category: "AI Recommended" },
+  { id: "9", name: "Editorial Style", preview: "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&h=225&fit=crop", category: "All" },
+  { id: "10", name: "Newsroom Pro", preview: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=225&fit=crop", category: "All" },
 ];
 
 const verticalThemes = [
-  { id: "v1", name: "Story Pop", preview: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=225&h=400&fit=crop" },
-  { id: "v2", name: "Neon Vibes", preview: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=225&h=400&fit=crop" },
-  { id: "v3", name: "Classic Serif", preview: "https://images.unsplash.com/photo-1557682250-33bd709cbe85?w=225&h=400&fit=crop" },
+  { id: "v1", name: "Story Pop", preview: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "Previously Used" },
+  { id: "v2", name: "Neon Vibes", preview: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "AI Recommended" },
+  { id: "v3", name: "Classic Serif", preview: "https://images.unsplash.com/photo-1557682250-33bd709cbe85?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "All" },
+  { id: "v4", name: "Modern Minimal", preview: "https://images.unsplash.com/photo-1557683316-973673baf926?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "AI Recommended" },
+  { id: "v5", name: "Bold Colors", preview: "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "All" },
+  { id: "v6", name: "Times of India", preview: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "Previously Used" },
+  { id: "v7", name: "Economic Times", preview: "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "All" },
+  { id: "v8", name: "News Story", preview: "https://images.unsplash.com/photo-1495020689067-958852a7765e?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "Previously Used" },
+  { id: "v9", name: "Business Vertical", preview: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "AI Recommended" },
+  { id: "v10", name: "Editorial Vertical", preview: "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "All" },
+  { id: "v11", name: "Newsroom Mobile", preview: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&h=1067&fit=crop&crop=center&q=90&auto=format", category: "All" },
 ];
+
+// Sortable Scene Item Component
+interface SortableSceneItemProps {
+  scene: { id: number; caption: string; voiceover: string; mediaUrl?: string; mediaType?: 'image' | 'video'; thumbnail?: string; sameAsCaption?: boolean; captionColor?: string; captionFontSize?: number; captionFontFamily?: string; captionX?: number; captionY?: number; captionWidth?: number; captionHeight?: number; captionBackgroundColor?: string; captionStyle?: string };
+  index: number;
+  activeSceneIndex: number;
+  selectedCaptionIndex: number | null;
+  setActiveSceneIndex: (index: number) => void;
+  setSelectedCaptionIndex: (index: number | null) => void;
+  format: "16:9" | "9:16";
+  renderPreview: (format: "16:9" | "9:16", label: string) => React.ReactNode;
+  sceneRef?: (node: HTMLElement | null) => void;
+}
+
+function SortableSceneItem({
+  scene,
+  index,
+  activeSceneIndex,
+  selectedCaptionIndex,
+  setActiveSceneIndex,
+  setSelectedCaptionIndex,
+  format,
+  renderPreview,
+  sceneRef,
+}: SortableSceneItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: scene.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  // Combine refs for sortable and intersection observer
+  const combinedRef = (node: HTMLElement | null) => {
+    setNodeRef(node);
+    if (sceneRef) {
+      sceneRef(node);
+    }
+  };
+
+  return (
+    <div
+      ref={combinedRef}
+      style={style}
+      data-scene-index={index}
+      className={cn(
+        "relative rounded-lg border-2 overflow-hidden transition-all cursor-pointer",
+        activeSceneIndex === index
+          ? "border-primary ring-2 ring-primary/30 shadow-md"
+          : "border-border hover:border-primary/50"
+      )}
+      onClick={(e) => {
+        // Only set active scene if not clicking on caption or drag handle
+        if (!(e.target as HTMLElement).closest('[data-caption-overlay]') &&
+            !(e.target as HTMLElement).closest('[data-drag-handle]')) {
+          setActiveSceneIndex(index);
+          setSelectedCaptionIndex(null);
+        }
+      }}
+    >
+      {/* Drag Handle */}
+      <div
+        {...attributes}
+        {...listeners}
+        data-drag-handle
+        className="absolute top-2 right-2 z-20 p-1.5 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background cursor-grab active:cursor-grabbing"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+      </div>
+      
+      <div className={format === "9:16" ? "max-w-[200px] mx-auto" : ""}>
+        <div className="p-2">
+          {renderPreview(format, format)}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function VideoCreationForm({
   onBack,
   onPreview,
   onAdvancedEdit,
 }: VideoCreationFormProps) {
-  const [title, setTitle] = useState("India's GDP Growth Surpasses Expectations in Q3");
-  const [description, setDescription] = useState("A comprehensive look at India's economic recovery and the factors driving growth in the third quarter.");
-  const [keywords, setKeywords] = useState("GDP, Economy, India, Growth, Q3");
-  const [category, setCategory] = useState("Economy");
-  const [slides, setSlides] = useState("6");
-  const [videoType, setVideoType] = useState("news");
-  const [format, setFormat] = useState<FormatOption>("both");
-  const [selectedTheme16x9, setSelectedTheme16x9] = useState("1");
-  const [selectedTheme9x16, setSelectedTheme9x16] = useState("v1");
+  const { theme, setTheme } = useTheme();
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isOpen, setIsOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [uploadedSearchQuery, setUploadedSearchQuery] = useState("");
+  const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
+    from: undefined,
+    to: undefined,
+  });
+  const [selectedVideos, setSelectedVideos] = useState<string[]>([]);
+  const [videoTab, setVideoTab] = useState("videos");
+  const [videoFormatTab, setVideoFormatTab] = useState("horizontal");
+  const [uploadedVideoFormatTab, setUploadedVideoFormatTab] = useState("horizontal");
+  const [templateFormatTab, setTemplateFormatTab] = useState("horizontal");
+  const [musicSearchQuery, setMusicSearchQuery] = useState("");
+  const [musicFilter, setMusicFilter] = useState<"all" | "my-uploads" | "previously-used" | "ai-recommended">("all");
+  const [uploadedMusic, setUploadedMusic] = useState<Array<{ id: string; name: string; duration: string; source: string; category?: string }>>([]);
+  const [scenesData, setScenesData] = useState<Array<{ id: number; caption: string; voiceover: string; mediaUrl?: string; mediaType?: 'image' | 'video'; thumbnail?: string; sameAsCaption?: boolean; voiceoverMode?: 'noCaption' | 'custom' | 'sameAsCaption'; captionColor?: string; captionFontSize?: number; captionFontFamily?: string; captionX?: number; captionY?: number; captionWidth?: number; captionHeight?: number; captionBackgroundColor?: string; captionStyle?: string; duration?: string }>>([]);
+  const [activeSceneIndex, setActiveSceneIndex] = useState(0);
+  const [originalValues, setOriginalValues] = useState<{ caption: string; voiceover: string; sameAsCaption: boolean; voiceoverMode?: 'noCaption' | 'custom' | 'sameAsCaption'; captionColor?: string; captionFontSize?: number; captionFontFamily?: string; captionX?: number; captionY?: number; captionWidth?: number; captionHeight?: number; captionBackgroundColor?: string; captionStyle?: string } | null>(null);
+  const [isDraggingCaption, setIsDraggingCaption] = useState(false);
+  const [isResizingCaption, setIsResizingCaption] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  const [selectedCaptionIndex, setSelectedCaptionIndex] = useState<number | null>(null);
+  const [selectedAiVoice, setSelectedAiVoice] = useState("voice2");
+  const [selectedVideoForEdit, setSelectedVideoForEdit] = useState<{ id: string; title: string; thumbnail: string; duration: string; isVertical?: boolean } | null>(null);
+  const [videoStartTime, setVideoStartTime] = useState("00:00");
+  const [videoEndTime, setVideoEndTime] = useState("00:00");
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const [isDraggingStart, setIsDraggingStart] = useState(false);
+  const [isDraggingEnd, setIsDraggingEnd] = useState(false);
+  const [isDraggingCurrent, setIsDraggingCurrent] = useState(false);
+  const [isHoveringVideo, setIsHoveringVideo] = useState(false);
+  const [selectedSceneForVideo, setSelectedSceneForVideo] = useState("ai");
+  const [selectedMusicForEdit, setSelectedMusicForEdit] = useState<{ id: string; name: string; duration: string; source: string; category?: string } | null>(null);
+  const [musicStartTime, setMusicStartTime] = useState("00:00");
+  const [musicEndTime, setMusicEndTime] = useState("00:00");
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [musicCurrentTime, setMusicCurrentTime] = useState(0);
+  const [isDraggingMusicStart, setIsDraggingMusicStart] = useState(false);
+  const [isDraggingMusicEnd, setIsDraggingMusicEnd] = useState(false);
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isAiVoicePlaying, setIsAiVoicePlaying] = useState(false);
+  const [previewVoiceId, setPreviewVoiceId] = useState<string | null>(null);
+  const aiVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [aiRewriteMenuOpen, setAiRewriteMenuOpen] = useState<{ title: boolean; description: boolean; keywords: boolean }>({
+    title: false,
+    description: false,
+    keywords: false,
+  });
+  const [panelResetKey, setPanelResetKey] = useState(0);
+  const [horizontalPanelResetKey, setHorizontalPanelResetKey] = useState(0);
+  const [verticalPanelResetKey, setVerticalPanelResetKey] = useState(0);
+  const [horizontalPreviewTab, setHorizontalPreviewTab] = useState<"horizontal" | "vertical">("horizontal");
+  const [finalOutputTab, setFinalOutputTab] = useState<"horizontal" | "vertical">("horizontal");
+  const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
+  const [isReplaceVideoDialogOpen, setIsReplaceVideoDialogOpen] = useState(false);
+  const [replaceVideoSceneIndex, setReplaceVideoSceneIndex] = useState<number | null>(null);
+  const [replaceVideoTab, setReplaceVideoTab] = useState<"upload" | "slike">("upload");
+  const [replaceVideoSearchQuery, setReplaceVideoSearchQuery] = useState("");
+  const [selectedVideoForTrim, setSelectedVideoForTrim] = useState<{ id: string; title: string; thumbnail: string; duration: string } | null>(null);
+  const [isVideoTrimDialogOpen, setIsVideoTrimDialogOpen] = useState(false);
+  const [videoTrimStartTime, setVideoTrimStartTime] = useState("00:00");
+  const [videoTrimEndTime, setVideoTrimEndTime] = useState("00:00");
+  const [videoTrimCurrentTime, setVideoTrimCurrentTime] = useState(0);
+  const [isVideoTrimPlaying, setIsVideoTrimPlaying] = useState(false);
+  const [isVideoTrimMuted, setIsVideoTrimMuted] = useState(true);
+  const [isHoveringVideoTrim, setIsHoveringVideoTrim] = useState(false);
+  const videoTrimRef = useRef<HTMLVideoElement | null>(null);
+  
+  // Refs for scene sync (used in preview steps)
+  const sceneRefsMap = useRef<Map<number, HTMLElement>>(new Map());
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isUserScrolling = useRef(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const verticalSceneRefsMap = useRef<Map<number, HTMLElement>>(new Map());
+  const verticalScrollContainerRef = useRef<HTMLDivElement>(null);
+  const isVerticalUserScrolling = useRef(false);
+  const verticalScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Reset panels to default sizes when entering preview
+  useEffect(() => {
+    if (currentStep === 3) {
+      // When entering preview, reset to 50/50 split
+      setHorizontalPanelResetKey(prev => prev + 1);
+    }
+  }, [currentStep]);
+
+  // Handle drag end for scene reordering
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      setScenesData((items) => {
+        const oldIndex = items.findIndex((item) => item.id === Number(active.id));
+        const newIndex = items.findIndex((item) => item.id === Number(over.id));
+        
+        const newItems = arrayMove(items, oldIndex, newIndex);
+        // Update scene IDs to match new order
+        return newItems.map((item, index) => ({
+          ...item,
+          id: index + 1,
+        }));
+      });
+      
+      // Update active scene index if needed
+      const oldIndex = scenesData.findIndex((item) => item.id === Number(active.id));
+      const newIndex = scenesData.findIndex((item) => item.id === Number(over.id));
+      if (activeSceneIndex === oldIndex) {
+        setActiveSceneIndex(newIndex);
+      } else if (activeSceneIndex === newIndex) {
+        setActiveSceneIndex(oldIndex);
+      } else if (activeSceneIndex > oldIndex && activeSceneIndex <= newIndex) {
+        setActiveSceneIndex(activeSceneIndex - 1);
+      } else if (activeSceneIndex < oldIndex && activeSceneIndex >= newIndex) {
+        setActiveSceneIndex(activeSceneIndex + 1);
+      }
+    }
+  };
+
+  // Handle adding a new scene manually
+  const handleAddScene = () => {
+    const newSceneId = scenesData.length > 0 
+      ? Math.max(...scenesData.map(s => s.id)) + 1 
+      : 1;
+    
+    const newScene = {
+      id: newSceneId,
+      caption: `New Scene ${newSceneId}`,
+      voiceover: `Voiceover text for scene ${newSceneId}`,
+      thumbnail: "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
+      captionColor: "#FFFFFF",
+      captionFontSize: 16,
+      captionFontFamily: "Inter",
+      captionX: 0,
+      captionY: 85,
+      captionWidth: 100,
+      captionHeight: 15,
+      captionBackgroundColor: "rgba(0, 0, 0, 0.7)",
+      captionStyle: "default",
+      sameAsCaption: false,
+      duration: "5s",
+    };
+    
+    setScenesData([...scenesData, newScene]);
+    setActiveSceneIndex(scenesData.length); // Set the new scene as active
+  };
+  const [uploadedVideos, setUploadedVideos] = useState<Array<{ id: string; title: string; thumbnail: string; duration: string }>>([
+    {
+      id: "u1",
+      title: "My First Uploaded Video",
+      thumbnail: "https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=400&h=225&fit=crop",
+      duration: "01:23",
+    },
+    {
+      id: "u2",
+      title: "Project Presentation Video",
+      thumbnail: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=225&fit=crop",
+      duration: "02:15",
+    },
+    {
+      id: "u3",
+      title: "Tutorial Recording",
+      thumbnail: "https://images.unsplash.com/photo-1557804506-669a67965ba0?w=400&h=225&fit=crop",
+      duration: "03:42",
+    },
+    {
+      id: "u4",
+      title: "Product Demo Video",
+      thumbnail: "https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=225&fit=crop",
+      duration: "01:58",
+    },
+  ]);
+
+  // Mock videos from Slike
+  const slikeVideos = [
+    {
+      id: "1",
+      title: "Shilpa Shetty Sets Fashion Goals In Latest Photoshoot",
+      thumbnail: "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&h=225&fit=crop",
+      duration: "00:34",
+    },
+    {
+      id: "2",
+      title: "Piyush Mishra To Perform Aarambh 2.0 In Pune",
+      thumbnail: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=225&fit=crop",
+      duration: "00:40",
+    },
+    {
+      id: "3",
+      title: "Mary Kom Shares Fitness Inspiration At Health Event",
+      thumbnail: "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=225&fit=crop",
+      duration: "00:35",
+    },
+    {
+      id: "4",
+      title: "Dharmendra Remembered At Condolence Meet In ...",
+      thumbnail: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=225&fit=crop",
+      duration: "00:42",
+    },
+    {
+      id: "5",
+      title: "Samantha Ruth Prabhu",
+      thumbnail: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=225&fit=crop",
+      duration: "00:36",
+    },
+    {
+      id: "6",
+      title: "Ishaan Khatter Impresses",
+      thumbnail: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=225&fit=crop",
+      duration: "00:33",
+    },
+    {
+      id: "7",
+      title: "Rahul Gandhi Meets Lionel Messi During GOAT India ...",
+      thumbnail: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=225&fit=crop",
+      duration: "00:38",
+    },
+    {
+      id: "8",
+      title: "Police Detain Organiser After Messi Event Chaos",
+      thumbnail: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=225&fit=crop",
+      duration: "00:37",
+    },
+  ];
+
+  // AI Voice options
+  const aiVoices = [
+    { id: "voice1", name: "Professional Male", gender: "Male", accent: "Neutral" },
+    { id: "voice2", name: "Professional Female", gender: "Female", accent: "Neutral" },
+    { id: "voice3", name: "News Anchor Male", gender: "Male", accent: "American" },
+    { id: "voice4", name: "News Anchor Female", gender: "Female", accent: "American" },
+    { id: "voice5", name: "Warm Female", gender: "Female", accent: "British" },
+    { id: "voice6", name: "Authoritative Male", gender: "Male", accent: "British" },
+  ];
+
+  // Background music tracks
+  const musicTracks = [
+    { id: "m1", name: "News Upbeat Modern", duration: "2:34", source: "AI Selected", category: "AI Recommended" },
+    { id: "m2", name: "Corporate Professional", duration: "3:12", source: "Library", category: "Previously Used" },
+    { id: "m3", name: "Energetic Pop", duration: "2:58", source: "Library", category: "Library" },
+    { id: "m4", name: "Calm Ambient", duration: "4:20", source: "Library", category: "Previously Used" },
+    { id: "m5", name: "Tech Innovation", duration: "3:05", source: "Library", category: "AI Recommended" },
+    { id: "m6", name: "Motivational Uplift", duration: "2:45", source: "Library", category: "Library" },
+    { id: "m7", name: "Newsroom Background", duration: "3:30", source: "Library", category: "Previously Used" },
+    { id: "m8", name: "Modern Cinematic", duration: "2:50", source: "Library", category: "Library" },
+  ];
+
+  // Form state
+  const [formData, setFormData] = useState({
+    title: "India's GDP Growth Surpasses Expectations in Q3",
+    description: "India's economy has demonstrated remarkable resilience in the third quarter, with GDP growth exceeding all expectations. The comprehensive economic recovery can be attributed to several key factors including robust manufacturing output, strong service sector performance, and increased consumer spending. The agricultural sector has also contributed significantly to this growth trajectory. Government initiatives and policy reforms have played a crucial role in stimulating economic activity across various sectors. This positive trend indicates a promising outlook for the remainder of the fiscal year, with analysts predicting sustained growth momentum.",
+    keywords: "GDP, Economy, India, Growth, Q3",
+    category: "Economy",
+    scenes: "6",
+    videoType: "news",
+    format: "both" as FormatOption,
+    selectedTheme16x9: "",
+    selectedTheme9x16: "",
+    backgroundMusic: "",
+  });
+
+  // Initialize scenes data based on number of scenes
+  useEffect(() => {
+    const numScenes = parseInt(formData.scenes) || 6;
+    if (scenesData.length !== numScenes) {
+      const dummyCaptions = [
+        "India's GDP Growth Surpasses Expectations in Q3",
+        "The economy has demonstrated remarkable resilience",
+        "Robust manufacturing output drives recovery",
+        "Service sector performance exceeds expectations",
+        "Government initiatives fuel economic growth",
+        "Positive outlook for the remainder of the fiscal year",
+      ];
+      const dummyVoiceovers = [
+        "India's economy has shown exceptional growth in the third quarter, surpassing all expectations.",
+        "The comprehensive economic recovery can be attributed to several key factors.",
+        "Manufacturing output has been particularly strong, contributing significantly to GDP growth.",
+        "The service sector has also performed exceptionally well, exceeding previous forecasts.",
+        "Government initiatives and policy reforms have played a crucial role in stimulating economic activity.",
+        "This positive trend indicates a promising outlook for the remainder of the fiscal year.",
+      ];
+      
+      const dummyThumbnails = [
+        "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
+        "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400&h=225&fit=crop",
+        "https://images.unsplash.com/photo-1560472355-536de3962603?w=400&h=225&fit=crop",
+        "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=400&h=225&fit=crop",
+        "https://images.unsplash.com/photo-1579532537598-459ecdaf39cc?w=400&h=225&fit=crop",
+        "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=400&h=225&fit=crop",
+      ];
+      
+      setScenesData(
+        Array.from({ length: numScenes }, (_, i) => ({
+          id: i + 1,
+          caption: dummyCaptions[i] || `Scene ${i + 1} caption`,
+          voiceover: dummyVoiceovers[i] || `Scene ${i + 1} voiceover text`,
+          thumbnail: dummyThumbnails[i] || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
+          captionColor: "#FFFFFF",
+          captionFontSize: 16,
+          captionFontFamily: "Inter",
+          captionX: 0,
+          captionY: 85,
+          captionWidth: 100,
+          captionHeight: 15,
+          captionBackgroundColor: "rgba(0, 0, 0, 0.7)",
+          captionStyle: "default",
+          duration: "5s",
+        }))
+      );
+    }
+  }, [formData.scenes]);
+
+  // Track original values when active scene changes
+  useEffect(() => {
+    if (scenesData[activeSceneIndex]) {
+      setOriginalValues({
+        caption: scenesData[activeSceneIndex].caption,
+        voiceover: scenesData[activeSceneIndex].voiceover,
+        sameAsCaption: scenesData[activeSceneIndex].sameAsCaption || false,
+        voiceoverMode: scenesData[activeSceneIndex].voiceoverMode || (scenesData[activeSceneIndex].sameAsCaption ? 'sameAsCaption' : 'custom'),
+        captionColor: scenesData[activeSceneIndex].captionColor || "#FFFFFF",
+        captionFontSize: scenesData[activeSceneIndex].captionFontSize || 16,
+        captionFontFamily: scenesData[activeSceneIndex].captionFontFamily || "Inter",
+        captionX: scenesData[activeSceneIndex].captionX || 0,
+        captionY: scenesData[activeSceneIndex].captionY || 85,
+        captionWidth: scenesData[activeSceneIndex].captionWidth || 100,
+        captionHeight: scenesData[activeSceneIndex].captionHeight || 15,
+        captionBackgroundColor: scenesData[activeSceneIndex].captionBackgroundColor || "rgba(0, 0, 0, 0.7)",
+        captionStyle: scenesData[activeSceneIndex].captionStyle || "default",
+      });
+    }
+  }, [activeSceneIndex, scenesData.length]);
+
+  // Deselect caption when active scene changes
+  useEffect(() => {
+    setSelectedCaptionIndex(null);
+  }, [activeSceneIndex]);
+
+  // Handle caption dragging
+  useEffect(() => {
+    if (isDraggingCaption) {
+      const handleMouseMove = (e: MouseEvent) => {
+        const activeScene = scenesData[activeSceneIndex];
+        if (!activeScene) return;
+        
+        const container = document.querySelector(`[data-scene-preview="${activeSceneIndex}"]`);
+        if (!container) return;
+        
+        const rect = container.getBoundingClientRect();
+        const x = ((e.clientX - rect.left - dragStart.x) / rect.width) * 100;
+        const y = ((e.clientY - rect.top - dragStart.y) / rect.height) * 100;
+        
+        const updated = [...scenesData];
+        updated[activeSceneIndex] = {
+          ...updated[activeSceneIndex],
+          captionX: Math.max(0, Math.min(100 - (updated[activeSceneIndex].captionWidth || 100), x)),
+          captionY: Math.max(0, Math.min(100 - (updated[activeSceneIndex].captionHeight || 15), y)),
+        };
+        setScenesData(updated);
+      };
+      
+      const handleMouseUp = () => {
+        setIsDraggingCaption(false);
+      };
+      
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDraggingCaption, dragStart, activeSceneIndex, scenesData]);
+
+  // Handle caption resizing
+  useEffect(() => {
+    if (isResizingCaption && resizeHandle) {
+      const handleMouseMove = (e: MouseEvent) => {
+        const activeScene = scenesData[activeSceneIndex];
+        if (!activeScene) return;
+        
+        const container = document.querySelector(`[data-scene-preview="${activeSceneIndex}"]`);
+        if (!container) return;
+        
+        const rect = container.getBoundingClientRect();
+        const deltaX = ((e.clientX - resizeStart.x) / rect.width) * 100;
+        const deltaY = ((e.clientY - resizeStart.y) / rect.height) * 100;
+        
+        const updated = [...scenesData];
+        let newX = activeScene.captionX || 0;
+        let newY = activeScene.captionY || 85;
+        let newWidth = activeScene.captionWidth || 100;
+        let newHeight = activeScene.captionHeight || 15;
+        
+        if (resizeHandle.includes('right')) {
+          newWidth = Math.max(10, Math.min(100 - newX, resizeStart.width + deltaX));
+        }
+        if (resizeHandle.includes('left')) {
+          const widthChange = -deltaX;
+          if (newX + widthChange >= 0 && newWidth - widthChange >= 10) {
+            newX += widthChange;
+            newWidth -= widthChange;
+          }
+        }
+        if (resizeHandle.includes('bottom')) {
+          newHeight = Math.max(5, Math.min(100 - newY, resizeStart.height + deltaY));
+        }
+        if (resizeHandle.includes('top')) {
+          const heightChange = -deltaY;
+          if (newY + heightChange >= 0 && newHeight - heightChange >= 5) {
+            newY += heightChange;
+            newHeight -= heightChange;
+          }
+        }
+        
+        updated[activeSceneIndex] = {
+          ...updated[activeSceneIndex],
+          captionX: newX,
+          captionY: newY,
+          captionWidth: newWidth,
+          captionHeight: newHeight,
+        };
+        setScenesData(updated);
+      };
+      
+      const handleMouseUp = () => {
+        setIsResizingCaption(false);
+        setResizeHandle(null);
+      };
+      
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isResizingCaption, resizeHandle, resizeStart, activeSceneIndex, scenesData]);
+
+  // Cleanup audio when component unmounts or step changes
+  useEffect(() => {
+    return () => {
+      if (aiVoiceAudioRef.current) {
+        aiVoiceAudioRef.current.pause();
+        aiVoiceAudioRef.current.currentTime = 0;
+        setIsAiVoicePlaying(false);
+      }
+    };
+  }, [currentStep]);
+
+  // Intersection Observer for smooth scene sync in Horizontal Preview
+  useEffect(() => {
+    if (currentStep !== 3 || !scrollContainerRef.current) return;
+    
+    const container = scrollContainerRef.current;
+    
+    let updateTimeout: NodeJS.Timeout | null = null;
+    let rafId: number | null = null;
+
+    const findMostVisibleScene = () => {
+      if (!container) return activeSceneIndex;
+      
+      const containerRect = container.getBoundingClientRect();
+      const containerCenter = containerRect.top + containerRect.height / 2;
+      const containerHeight = containerRect.height;
+      
+      let bestIndex = activeSceneIndex;
+      let bestScore = -Infinity;
+      
+      // Improved approach: consider both visibility and distance from center
+      sceneRefsMap.current.forEach((element, index) => {
+        if (!element) return;
+        
+        try {
+          const rect = element.getBoundingClientRect();
+          
+          // Calculate how much of the element is visible in the container
+          const visibleTop = Math.max(rect.top, containerRect.top);
+          const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+          const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+          const visibilityRatio = visibleHeight / rect.height;
+          
+          // Calculate distance from container center
+          const elementCenter = rect.top + rect.height / 2;
+          const distanceFromCenter = Math.abs(elementCenter - containerCenter);
+          const normalizedDistance = Math.min(1, distanceFromCenter / (containerHeight / 2));
+          
+          // Combined score: visibility ratio weighted more, distance weighted less
+          // Higher score = better (more visible and closer to center)
+          const score = visibilityRatio * 0.85 + (1 - normalizedDistance) * 0.15;
+          
+          // Only consider elements that are at least 20% visible
+          if (visibilityRatio > 0.2 && score > bestScore) {
+            bestScore = score;
+            bestIndex = index;
+          }
+        } catch (e) {
+          // Skip if element is not in DOM
+        }
+      });
+      
+      // If we found a valid scene, return it; otherwise keep current
+      return bestScore > -Infinity ? bestIndex : activeSceneIndex;
+    };
+
+    const updateActiveScene = (force = false) => {
+      // Always allow updates during scroll - the scroll handler should always update
+      // Only block if not forced and we're in a brief debounce period
+      if (!force && isUserScrolling.current) {
+        // Still allow updates if we're in the middle of scrolling (not just stopped)
+        // This helps with slow scrolling
+        return;
+      }
+      
+      const mostVisible = findMostVisibleScene();
+      // Always update if we found a different scene
+      if (mostVisible !== activeSceneIndex && mostVisible >= 0 && mostVisible < scenesData.length) {
+        setActiveSceneIndex(mostVisible);
+      }
+    };
+
+    const handleScroll = () => {
+      // Always update during scroll - don't block updates
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+      
+      rafId = requestAnimationFrame(() => {
+        // Clear existing timeout
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
+        // Always update immediately during scroll (bypass the flag check)
+        const mostVisible = findMostVisibleScene();
+        if (mostVisible !== activeSceneIndex && mostVisible >= 0 && mostVisible < scenesData.length) {
+          setActiveSceneIndex(mostVisible);
+        }
+        
+        // Set flag only briefly to prevent IntersectionObserver conflicts
+        // But scroll handler always updates directly
+        isUserScrolling.current = true;
+        updateTimeout = setTimeout(() => {
+          isUserScrolling.current = false;
+          // Final update after scroll stops
+          const finalMostVisible = findMostVisibleScene();
+          if (finalMostVisible !== activeSceneIndex && finalMostVisible >= 0 && finalMostVisible < scenesData.length) {
+            setActiveSceneIndex(finalMostVisible);
+          }
+        }, 150); // Brief timeout for scroll end detection
+      });
+    };
+
+    // Use IntersectionObserver as a fallback for more precise detection
+    const observerOptions = {
+      root: container,
+      rootMargin: '0px',
+      threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      // Don't block if user is scrolling - let scroll handler take precedence
+      // But still process if scroll has been idle
+      if (isUserScrolling.current) {
+        // Still check but with a small delay to avoid conflicts
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+        }
+        rafId = requestAnimationFrame(() => {
+          if (updateTimeout) {
+            clearTimeout(updateTimeout);
+          }
+          updateTimeout = setTimeout(() => {
+            const mostVisibleIndex = findMostVisibleScene();
+            if (mostVisibleIndex !== activeSceneIndex && mostVisibleIndex >= 0 && mostVisibleIndex < scenesData.length) {
+              setActiveSceneIndex(mostVisibleIndex);
+            }
+          }, 50);
+        });
+        return;
+      }
+      
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+      
+      rafId = requestAnimationFrame(() => {
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
+        updateTimeout = setTimeout(() => {
+          // Always use distance-based method as primary (more reliable)
+          const mostVisibleIndex = findMostVisibleScene();
+          
+          if (mostVisibleIndex !== activeSceneIndex && mostVisibleIndex >= 0 && mostVisibleIndex < scenesData.length) {
+            setActiveSceneIndex(mostVisibleIndex);
+          }
+        }, 20); // Reduced delay for faster response
+      });
+    }, observerOptions);
+
+    // Observe all scene elements
+    const observeAll = () => {
+      sceneRefsMap.current.forEach((element) => {
+        if (element) observer.observe(element);
+      });
+    };
+
+    // Initial observation
+    observeAll();
+
+    // Set up scroll listener
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    
+    // Also check periodically for any missed updates (more frequent for better sync)
+    const intervalId = setInterval(() => {
+      // Force update during interval to catch any missed changes
+      // Always update, even during scroll, to catch slow scrolling
+      updateActiveScene(true);
+    }, 50); // More frequent checks for slow scrolling
+
+    // Re-observe when scenes change
+    const reobserveTimeout = setTimeout(() => {
+      observeAll();
+      // Also update after re-observing
+      setTimeout(() => updateActiveScene(true), 50);
+    }, 100);
+    
+    // Also re-observe after a longer delay to catch any late-rendered elements
+    const delayedReobserve = setTimeout(() => {
+      observeAll();
+      updateActiveScene(true);
+    }, 500);
+    
+    // Initial update check - multiple attempts to ensure it works
+    const initialUpdate1 = setTimeout(() => {
+      updateActiveScene(true);
+    }, 50);
+    const initialUpdate2 = setTimeout(() => {
+      updateActiveScene(true);
+    }, 200);
+    const initialUpdate3 = setTimeout(() => {
+      updateActiveScene(true);
+    }, 500);
+
+    return () => {
+      observer.disconnect();
+      container.removeEventListener('scroll', handleScroll);
+      clearInterval(intervalId);
+      if (updateTimeout) {
+        clearTimeout(updateTimeout);
+      }
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+      clearTimeout(reobserveTimeout);
+      clearTimeout(delayedReobserve);
+      clearTimeout(initialUpdate1);
+      clearTimeout(initialUpdate2);
+      clearTimeout(initialUpdate3);
+    };
+  }, [currentStep, scenesData.length, activeSceneIndex, horizontalPreviewTab]);
+
+
+  const filteredVideos = slikeVideos.filter((video) =>
+    video.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredUploadedVideos = uploadedVideos.filter((video) =>
+    video.title.toLowerCase().includes(uploadedSearchQuery.toLowerCase())
+  );
+
+  const toggleVideo = (videoId: string) => {
+    const video = [...slikeVideos, ...uploadedVideos].find(v => v.id === videoId);
+    if (video) {
+      // Determine if video is vertical based on current format tab
+      const isVertical = videoTab === "videos" ? videoFormatTab === "vertical" : uploadedVideoFormatTab === "vertical";
+      setSelectedVideoForEdit({ ...video, isVertical });
+      // Parse duration to seconds for end time
+      const durationParts = video.duration.split(":");
+      const durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+      setVideoEndTime(video.duration);
+      setVideoCurrentTime(0);
+      setIsVideoPlaying(false);
+    }
+  };
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const parseTime = (timeString: string): number => {
+    const parts = timeString.split(":");
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  };
+
+  const handleAddVideo = () => {
+    if (selectedVideoForEdit) {
+      // Add video to selected scene or let AI decide
+      if (selectedSceneForVideo === "ai") {
+        console.log(`Adding video ${selectedVideoForEdit.id} - AI will decide scene assignment with trim: ${videoStartTime} - ${videoEndTime}`);
+      } else {
+        const sceneNumber = parseInt(selectedSceneForVideo);
+        console.log(`Adding video ${selectedVideoForEdit.id} to scene ${sceneNumber} with trim: ${videoStartTime} - ${videoEndTime}`);
+      }
+      
+      if (!selectedVideos.includes(selectedVideoForEdit.id)) {
+        setSelectedVideos([...selectedVideos, selectedVideoForEdit.id]);
+      }
+      setSelectedVideoForEdit(null);
+      // Reset scene selection to AI decides
+      setSelectedSceneForVideo("ai");
+    }
+  };
+
+  const updateFormData = (field: string, value: any) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleNext = () => {
+    // If we're on TEMPLATE step with "both" format and on horizontal tab, switch to vertical
+    if (currentStep === 1 && formData.format === "both" && templateFormatTab === "horizontal") {
+      setTemplateFormatTab("vertical");
+      return;
+    }
+    
+    // Skip steps based on format
+    let nextStep = currentStep + 1;
+    
+    // If format is "9:16", skip horizontal preview step (step 3)
+    if (formData.format === "9:16" && nextStep === 3) {
+      nextStep = steps.length; // Skip to end (no preview step for 9:16)
+    }
+    
+    if (nextStep < steps.length) {
+      setCurrentStep(nextStep);
+    } else {
+      // Last step - proceed to preview
+      setIsOpen(false);
+      onPreview();
+    }
+  };
+
+  const handleBack = () => {
+    // If we're on TEMPLATE step with "both" format and on vertical tab, switch to horizontal
+    if (currentStep === 1 && formData.format === "both" && templateFormatTab === "vertical") {
+      setTemplateFormatTab("horizontal");
+      return;
+    }
+    
+    // Skip steps based on format when going back
+    let prevStep = currentStep - 1;
+    
+    // If format is "9:16", skip horizontal preview step (step 3)
+    if (formData.format === "9:16" && prevStep === 3) {
+      prevStep = 2; // Go back to BG AUDIO
+    }
+    
+    if (prevStep >= 0) {
+      setCurrentStep(prevStep);
+    } else {
+      setIsOpen(false);
+      onBack();
+    }
+  };
+
+  const handleResetPanels = () => {
+    // Reset panels to default size by forcing a re-render with new key
+    // For horizontal preview: 50/50 split
+    if (currentStep === 3) {
+      // Horizontal preview
+      setHorizontalPanelResetKey(prev => prev + 1);
+    }
+    setPanelResetKey(prev => prev + 1);
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+    onBack();
+  };
+
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 0: // METADATA
+        return (
+          <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                    <Label htmlFor="title">Video Title</Label>
+                      <Popover open={aiRewriteMenuOpen.title} onOpenChange={(open) => setAiRewriteMenuOpen(prev => ({ ...prev, title: open }))}>
+                        <PopoverTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Sparkles className="w-4 h-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-48 p-1 bg-white border border-gray-200 shadow-lg" align="end">
+                          <div className="space-y-0">
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Short & Concise
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Factual
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Conversational
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Dramatic
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Viral
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm flex items-center justify-between">
+                              <span>Translate</span>
+                              <ChevronRight className="w-4 h-4 text-gray-500" />
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Custom Prompt
+                            </button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <Input
+                      id="title"
+                value={formData.title}
+                onChange={(e) => updateFormData("title", e.target.value)}
+                className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                    <Label htmlFor="description">Video Description</Label>
+                      <Popover open={aiRewriteMenuOpen.description} onOpenChange={(open) => setAiRewriteMenuOpen(prev => ({ ...prev, description: open }))}>
+                        <PopoverTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Sparkles className="w-4 h-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-48 p-1 bg-white border border-gray-200 shadow-lg" align="end">
+                          <div className="space-y-0">
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Short & Concise
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Factual
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Conversational
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Dramatic
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Viral
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm flex items-center justify-between">
+                              <span>Translate</span>
+                              <ChevronRight className="w-4 h-4 text-gray-500" />
+                            </button>
+                            <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-sm">
+                              Custom Prompt
+                            </button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <Textarea
+                      id="description"
+                value={formData.description}
+                onChange={(e) => updateFormData("description", e.target.value)}
+                className="mt-1 min-h-[120px]"
+                    />
+                  </div>
+            {/* Keywords - Full width */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label htmlFor="keywords">Keywords / Tags</Label>
+                <Popover open={aiRewriteMenuOpen.keywords} onOpenChange={(open) => setAiRewriteMenuOpen(prev => ({ ...prev, keywords: open }))}>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <Sparkles className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48 p-1" align="end">
+                    <div className="space-y-0.5">
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm">
+                        Short & Concise
+                      </button>
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm">
+                        Factual
+                      </button>
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm">
+                        Conversational
+                      </button>
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm">
+                        Dramatic
+                      </button>
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm">
+                        Viral
+                      </button>
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm flex items-center justify-between">
+                        <span>Translate</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-sm">
+                        Custom Prompt
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <Input
+                id="keywords"
+                value={formData.keywords}
+                onChange={(e) => updateFormData("keywords", e.target.value)}
+                className="mt-1"
+              />
+            </div>
+
+            {/* Category, Number of Scenes, and Video Format in one row */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="category">Category</Label>
+                <Select value={formData.category} onValueChange={(value) => updateFormData("category", value)}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Economy">Economy</SelectItem>
+                    <SelectItem value="Politics">Politics</SelectItem>
+                    <SelectItem value="Sports">Sports</SelectItem>
+                    <SelectItem value="Technology">Technology</SelectItem>
+                    <SelectItem value="Entertainment">Entertainment</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="scenes">Number of Scenes</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => {
+                      const current = parseInt(formData.scenes) || 6;
+                      if (current > 4) {
+                        updateFormData("scenes", (current - 1).toString());
+                      }
+                    }}
+                    disabled={parseInt(formData.scenes) <= 4}
+                  >
+                    <Minus className="w-4 h-4" />
+                  </Button>
+                  <Input
+                    id="slides"
+                    type="number"
+                    min="4"
+                    max="10"
+                    value={formData.scenes}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || (parseInt(value) >= 4 && parseInt(value) <= 10)) {
+                        updateFormData("scenes", value);
+                      }
+                    }}
+                    className="text-center w-20"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => {
+                      const current = parseInt(formData.scenes) || 6;
+                      if (current < 10) {
+                        updateFormData("scenes", (current + 1).toString());
+                      }
+                    }}
+                    disabled={parseInt(formData.scenes) >= 10}
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+              
+              <div>
+                <Label className="mb-2 block text-sm font-medium">Video Format</Label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => updateFormData("format", "16:9")}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all duration-200 flex-1 ${
+                      formData.format === "16:9"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <Monitor className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium">16:9</span>
+                  </button>
+                  <button
+                    onClick={() => updateFormData("format", "9:16")}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all duration-200 flex-1 ${
+                      formData.format === "9:16"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium">9:16</span>
+                  </button>
+                  <button
+                    onClick={() => updateFormData("format", "both")}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all duration-200 flex-1 ${
+                      formData.format === "both"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <Monitor className="w-3.5 h-3.5 text-muted-foreground" />
+                      <Smartphone className="w-3.5 h-3.5 text-muted-foreground" />
+                    </div>
+                    <span className="text-xs font-medium">Both</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 1: // TEMPLATE
+        if (formData.format === "both") {
+          return (
+            <div className="space-y-6">
+              <Tabs value={templateFormatTab} onValueChange={setTemplateFormatTab} className="w-full">
+                <div className="relative mb-8">
+                  <TabsList className="w-full grid grid-cols-2">
+                    <TabsTrigger value="horizontal" className="flex-1 gap-2">
+                      <Monitor className="w-4 h-4" />
+                      Horizontal
+                      {formData.selectedTheme16x9 && (
+                        <Check className="w-4 h-4" />
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="vertical" className="flex-1 gap-2 relative">
+                      <Smartphone className="w-4 h-4" />
+                      Vertical
+                      {templateFormatTab === "horizontal" && !formData.selectedTheme9x16 && (
+                        <div className="absolute left-0 right-0 top-full mt-1 text-center z-10">
+                          <p className="text-[10px] text-muted-foreground">Vertical Template is to be selected</p>
+                        </div>
+                      )}
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+
+                <TabsContent value="horizontal" className="mt-0">
+                  <div className="grid grid-cols-4 gap-4">
+                    {themes.map((theme) => (
+                      <ThemeCard
+                        key={theme.id}
+                        name={theme.name}
+                        preview={theme.preview}
+                        format="16:9"
+                        selected={formData.selectedTheme16x9 === theme.id}
+                        onClick={() => updateFormData("selectedTheme16x9", theme.id)}
+                        delay={0}
+                        category={theme.category}
+                      />
+                    ))}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="vertical" className="mt-0">
+                  <div className="grid grid-cols-5 gap-4">
+                    {verticalThemes.map((theme) => (
+                      <ThemeCard
+                        key={theme.id}
+                        name={theme.name}
+                        preview={theme.preview}
+                        format="9:16"
+                        selected={formData.selectedTheme9x16 === theme.id}
+                        onClick={() => updateFormData("selectedTheme9x16", theme.id)}
+                        delay={0}
+                        category={theme.category}
+                      />
+                    ))}
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </div>
+          );
+        }
+
+        return (
+          <div className="space-y-8">
+            <div>
+              {formData.format === "16:9" && (
+                <div>
+                  <div className="grid grid-cols-4 gap-4">
+                    {themes.map((theme) => (
+                      <ThemeCard
+                        key={theme.id}
+                        name={theme.name}
+                        preview={theme.preview}
+                        format="16:9"
+                        selected={formData.selectedTheme16x9 === theme.id}
+                        onClick={() => updateFormData("selectedTheme16x9", theme.id)}
+                        delay={0}
+                        category={theme.category}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {formData.format === "9:16" && (
+                <div>
+                  <div className="grid grid-cols-5 gap-4">
+                    {verticalThemes.map((theme) => (
+                      <ThemeCard
+                        key={theme.id}
+                        name={theme.name}
+                        preview={theme.preview}
+                        format="9:16"
+                        selected={formData.selectedTheme9x16 === theme.id}
+                        onClick={() => updateFormData("selectedTheme9x16", theme.id)}
+                        delay={0}
+                        category={theme.category}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 2: // BG AUDIO
+        const filteredMusicTracks = musicTracks.filter((track) =>
+          track.name.toLowerCase().includes(musicSearchQuery.toLowerCase())
+        );
+        const filteredUploadedMusic = uploadedMusic.filter((track) =>
+          track.name.toLowerCase().includes(musicSearchQuery.toLowerCase())
+        );
+        
+        // Filter tracks based on selected filter
+        let displayedTracks: Array<{ id: string; name: string; duration: string; source: string; category?: string }> = [];
+        
+        if (musicFilter === "all") {
+          displayedTracks = [...filteredMusicTracks, ...filteredUploadedMusic];
+        } else if (musicFilter === "my-uploads") {
+          displayedTracks = filteredUploadedMusic;
+        } else if (musicFilter === "previously-used") {
+          displayedTracks = filteredMusicTracks.filter(track => track.category === "Previously Used");
+        } else if (musicFilter === "ai-recommended") {
+          displayedTracks = filteredMusicTracks.filter(track => track.category === "AI Recommended");
+        }
+
+        return (
+          <div className="space-y-3">
+                  <div>
+              {/* Search, Filter and Upload */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search music tracks..."
+                    value={musicSearchQuery}
+                    onChange={(e) => setMusicSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                {/* Filter Buttons */}
+                <div className="flex items-center gap-1 border border-border rounded-lg p-1">
+                  <button
+                    onClick={() => setMusicFilter("all")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
+                      musicFilter === "all"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setMusicFilter("previously-used")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
+                      musicFilter === "previously-used"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Previously Used
+                  </button>
+                  <button
+                    onClick={() => setMusicFilter("ai-recommended")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
+                      musicFilter === "ai-recommended"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    AI Recommended
+                  </button>
+                  <button
+                    onClick={() => setMusicFilter("my-uploads")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
+                      musicFilter === "my-uploads"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    My Uploads
+                  </button>
+                </div>
+                <Button variant="outline" size="icon" onClick={() => {
+                  // Handle upload - in real app, this would open file picker
+                  const newId = `um${uploadedMusic.length + 1}`;
+                  setUploadedMusic([...uploadedMusic, {
+                    id: newId,
+                    name: `Uploaded Track ${uploadedMusic.length + 1}`,
+                    duration: "0:00",
+                    source: "Uploaded"
+                  }]);
+                }}>
+                  <Upload className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {/* Music Tracks Grid */}
+              <div className="grid grid-cols-1 gap-2">
+                {displayedTracks.length > 0 ? (
+                  displayedTracks.map((track) => {
+                    const isSelected = formData.backgroundMusic === track.name;
+                    const isEditing = selectedMusicForEdit?.id === track.id;
+                    
+                    // If this track is being edited, show expanded card with all controls
+                    if (isEditing && selectedMusicForEdit) {
+                      return (
+                        <div key={track.id} className="p-5 rounded-lg border border-primary bg-primary/5 ring-2 ring-primary/20 space-y-4">
+                          {/* Header with track info, checkmark, and time inputs */}
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
+                              <Music className="w-6 h-6 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-base font-semibold text-foreground">
+                                {selectedMusicForEdit.name}
+                              </p>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {selectedMusicForEdit.category || selectedMusicForEdit.source} • {selectedMusicForEdit.duration}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs font-medium text-muted-foreground">Start</Label>
+                                <Input
+                                  type="text"
+                                  value={musicStartTime}
+                                  onChange={(e) => setMusicStartTime(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-20 h-8 text-center text-xs font-medium"
+                                  placeholder="00:00"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs font-medium text-muted-foreground">End</Label>
+                                <Input
+                                  type="text"
+                                  value={musicEndTime}
+                                  onChange={(e) => setMusicEndTime(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-20 h-8 text-center text-xs font-medium"
+                                  placeholder="00:00"
+                                />
+                              </div>
+                              <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shrink-0">
+                                <Check className="w-4 h-4 text-primary-foreground" />
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Audio Player */}
+                          <div className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg border">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (musicAudioRef.current) {
+                                  if (isMusicPlaying) {
+                                    musicAudioRef.current.pause();
+                                  } else {
+                                    musicAudioRef.current.play();
+                                  }
+                                  setIsMusicPlaying(!isMusicPlaying);
+                                }
+                              }}
+                              className="h-10 w-10"
+                            >
+                              {isMusicPlaying ? (
+                                <Pause className="w-5 h-5" />
+                              ) : (
+                                <Play className="w-5 h-5 ml-0.5" />
+                              )}
+                            </Button>
+                            <div className="flex-1">
+                              <div 
+                                className="relative h-3 bg-secondary/50 rounded-full overflow-visible cursor-pointer"
+                                data-music-progress
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isDraggingMusicStart && !isDraggingMusicEnd) {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const clickX = e.clientX - rect.left;
+                                    const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+                                    const totalDuration = parseTime(selectedMusicForEdit.duration);
+                                    const newTime = Math.floor(percentage * totalDuration);
+                                    setMusicCurrentTime(newTime);
+                                    if (musicAudioRef.current) {
+                                      musicAudioRef.current.currentTime = newTime;
+                                    }
+                                  }
+                                }}
+                              >
+                                {/* Selected area (between start and end time) */}
+                                <div
+                                  className="absolute h-full bg-primary/30 rounded-full transition-all"
+                                  style={{
+                                    left: `${(parseTime(musicStartTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                    width: `${((parseTime(musicEndTime) - parseTime(musicStartTime)) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                  }}
+                                />
+                                {/* Played portion within selected area */}
+                                {musicCurrentTime >= parseTime(musicStartTime) && musicCurrentTime <= parseTime(musicEndTime) && (
+                                  <div
+                                    className="absolute h-full bg-primary rounded-full transition-all"
+                                    style={{
+                                      left: `${(parseTime(musicStartTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                      width: `${((musicCurrentTime - parseTime(musicStartTime)) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                    }}
+                                  />
+                                )}
+                                {/* Played portion before selected area */}
+                                {musicCurrentTime < parseTime(musicStartTime) && (
+                                  <div
+                                    className="absolute h-full bg-primary/20 rounded-full transition-all"
+                                    style={{
+                                      width: `${(musicCurrentTime / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                    }}
+                                  />
+                                )}
+                                {/* Current position scrubber */}
+                                <div
+                                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full border-2 border-primary shadow-md z-20 cursor-pointer"
+                                  style={{
+                                    left: `calc(${(musicCurrentTime / parseTime(selectedMusicForEdit.duration)) * 100}% - 8px)`,
+                                  }}
+                                />
+                                {/* Start marker */}
+                                <div
+                                  className="absolute top-1/2 -translate-y-1/2 cursor-move z-10"
+                                  style={{
+                                    left: `${(parseTime(musicStartTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                    transform: 'translateX(-50%) translateY(-50%)',
+                                  }}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    setIsDraggingMusicStart(true);
+                                  }}
+                                >
+                                  <div className="w-3 h-3 bg-primary rounded-full border-2 border-white shadow-md" />
+                                </div>
+                                {/* End marker */}
+                                <div
+                                  className="absolute top-1/2 -translate-y-1/2 cursor-move z-10"
+                                  style={{
+                                    left: `${(parseTime(musicEndTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                    transform: 'translateX(-50%) translateY(-50%)',
+                                  }}
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    setIsDraggingMusicEnd(true);
+                                  }}
+                                >
+                                  <div className="w-3 h-3 bg-primary rounded-full border-2 border-white shadow-md" />
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between mt-2">
+                                <span className="text-sm text-muted-foreground tabular-nums font-medium">
+                                  {formatTime(musicCurrentTime)}
+                                </span>
+                                <span className="text-sm text-muted-foreground tabular-nums font-medium">
+                                  {selectedMusicForEdit.duration}
+                                </span>
+                              </div>
+                            </div>
+                            <audio
+                              ref={musicAudioRef}
+                              onTimeUpdate={(e) => {
+                                const audio = e.currentTarget;
+                                const currentTime = Math.floor(audio.currentTime);
+                                setMusicCurrentTime(currentTime);
+                                // Stop playback if we reach the end time
+                                if (currentTime >= parseTime(musicEndTime)) {
+                                  audio.pause();
+                                  setIsMusicPlaying(false);
+                                  audio.currentTime = parseTime(musicStartTime);
+                                }
+                              }}
+                              onEnded={() => {
+                                setIsMusicPlaying(false);
+                                setMusicCurrentTime(parseTime(musicStartTime));
+                                if (musicAudioRef.current) {
+                                  musicAudioRef.current.currentTime = parseTime(musicStartTime);
+                                }
+                              }}
+                              src={`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${selectedMusicForEdit.id.replace('m', '').replace('u', '') || '1'}.mp3`}
+                            />
+                          </div>
+                          
+                          {/* Mouse move handler for dragging */}
+                          {(isDraggingMusicStart || isDraggingMusicEnd) && (
+                            <div
+                              className="fixed inset-0 z-50 cursor-move"
+                              onMouseMove={(e) => {
+                                const progressBar = document.querySelector('[data-music-progress]') as HTMLElement;
+                                if (progressBar) {
+                                  const rect = progressBar.getBoundingClientRect();
+                                  const x = e.clientX - rect.left;
+                                  const percentage = Math.max(0, Math.min(1, x / rect.width));
+                                  const totalDuration = parseTime(selectedMusicForEdit.duration);
+                                  const newTime = Math.floor(percentage * totalDuration);
+                                  
+                                  if (isDraggingMusicStart) {
+                                    const endTime = parseTime(musicEndTime);
+                                    if (newTime < endTime) {
+                                      setMusicStartTime(formatTime(newTime));
+                                      if (musicAudioRef.current) {
+                                        musicAudioRef.current.currentTime = newTime;
+                                        setMusicCurrentTime(newTime);
+                                      }
+                                    }
+                                  } else if (isDraggingMusicEnd) {
+                                    const startTime = parseTime(musicStartTime);
+                                    if (newTime > startTime) {
+                                      setMusicEndTime(formatTime(newTime));
+                                      if (musicAudioRef.current && musicAudioRef.current.currentTime > newTime) {
+                                        musicAudioRef.current.currentTime = newTime;
+                                        setMusicCurrentTime(newTime);
+                                      }
+                                    }
+                                  }
+                                }
+                              }}
+                              onMouseUp={() => {
+                                setIsDraggingMusicStart(false);
+                                setIsDraggingMusicEnd(false);
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    }
+                    
+                    // For non-selected tracks, show simple card
+                    return (
+                    <div
+                      key={track.id}
+                      onClick={() => {
+                          setFormData({ ...formData, backgroundMusic: track.name });
+                        setSelectedMusicForEdit(track);
+                        setMusicEndTime(track.duration);
+                        setMusicStartTime("00:00");
+                          setMusicCurrentTime(0);
+                          if (musicAudioRef.current) {
+                            musicAudioRef.current.pause();
+                            musicAudioRef.current.currentTime = 0;
+                          }
+                          setIsMusicPlaying(false);
+                      }}
+                      className={cn(
+                        "p-2.5 rounded-lg border cursor-pointer transition-all",
+                          isSelected
+                          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                          : "border-border bg-secondary/30 hover:border-primary/50 hover:bg-secondary/50"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                            isSelected
+                            ? "bg-primary/20"
+                            : "bg-primary/10"
+                        )}>
+                          <Music className={cn(
+                            "w-4 h-4",
+                              isSelected
+                              ? "text-primary"
+                              : "text-primary/70"
+                          )} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">
+                            {track.name}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {track.category || track.source} • {track.duration}
+                          </p>
+                        </div>
+                          {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
+                            <Check className="w-3 h-3 text-primary-foreground" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">
+                      {musicFilter === "my-uploads" 
+                        ? "No uploads found. Click the upload button to add music tracks."
+                        : "No music tracks found matching your search."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 3: // Horizontal Preview
+        const activeSceneHorizontal = scenesData[activeSceneIndex] || scenesData[0];
+        
+        // If format is "9:16", show message that this step is not applicable
+        if (formData.format === "9:16") {
+        return (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center space-y-4">
+                <p className="text-lg text-muted-foreground">Horizontal Preview is not available for vertical format (9:16)</p>
+                <Button onClick={handleNext}>Continue</Button>
+              </div>
+            </div>
+          );
+        }
+        
+        // Helper function to render scene details
+        const renderSceneDetails = (scene: typeof scenesData[0], index: number) => {
+          const voiceoverMode = scene.voiceoverMode || (scene.sameAsCaption ? 'sameAsCaption' : 'custom');
+          return (
+            <div className="space-y-2 pl-6 w-full">
+              {/* Caption Section */}
+              <div>
+                <Label className="text-xs font-semibold mb-1 block">Caption</Label>
+                <Textarea
+                  value={scene.caption || ''}
+                  onChange={(e) => {
+                    const updated = [...scenesData];
+                    updated[index].caption = e.target.value;
+                    if (voiceoverMode === 'sameAsCaption') {
+                      updated[index].voiceover = e.target.value;
+                    }
+                    setScenesData(updated);
+                  }}
+                  className="min-h-[32px] text-sm"
+                  placeholder="Enter caption text..."
+                />
+              </div>
+
+              {/* Voiceover Section */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Label className="text-xs font-semibold shrink-0">Voiceover</Label>
+                  <div className="flex-1 flex justify-end">
+                    <Select
+                      value={voiceoverMode}
+                      onValueChange={(value: 'noCaption' | 'custom' | 'sameAsCaption') => {
+                        const updated = [...scenesData];
+                        updated[index].voiceoverMode = value;
+                        updated[index].sameAsCaption = value === 'sameAsCaption';
+                        if (value === 'sameAsCaption') {
+                          updated[index].voiceover = updated[index].caption || '';
+                        } else if (value === 'noCaption') {
+                          updated[index].voiceover = '';
+                        }
+                        setScenesData(updated);
+                      }}
+                    >
+                      <SelectTrigger className="w-[140px] h-6 text-xs shrink-0 py-0 px-2 rounded-none">
+                        <SelectValue placeholder="Select voiceover option" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-none">
+                        <SelectItem value="noCaption" className="text-xs rounded-none">No Caption</SelectItem>
+                        <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
+                        <SelectItem value="sameAsCaption" className="text-xs rounded-none">Same as Caption</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {(voiceoverMode === 'custom' || voiceoverMode === 'sameAsCaption') && (
+                  <Textarea
+                    value={scene.voiceover || ''}
+                    onChange={(e) => {
+                      if (voiceoverMode === 'custom') {
+                        const updated = [...scenesData];
+                        updated[index].voiceover = e.target.value;
+                        setScenesData(updated);
+                      }
+                    }}
+                    className="min-h-[36px] text-xs w-full"
+                    placeholder={voiceoverMode === 'sameAsCaption' ? "Same as caption (synced automatically)" : "Enter voiceover text..."}
+                    disabled={voiceoverMode === 'sameAsCaption'}
+                  />
+                )}
+              </div>
+
+              {/* Slide Duration Selection */}
+              <div className="mt-2 pt-2 border-t border-border/50">
+                <div>
+                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Slide Duration</Label>
+                  <div className="flex items-center gap-1 border border-border rounded-md px-2 h-9 bg-background">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 hover:bg-secondary"
+                      onClick={() => {
+                        const currentDuration = scene.duration || "5s";
+                        const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
+                        const newValue = Math.max(1, numericValue - 1);
+                        const updated = [...scenesData];
+                        updated[index].duration = `${newValue}s`;
+                        setScenesData(updated);
+                      }}
+                    >
+                      <Minus className="w-3 h-3" />
+                    </Button>
+                    <Input
+                      type="text"
+                      value={scene.duration || "5s"}
+                      onChange={(e) => {
+                        const updated = [...scenesData];
+                        updated[index].duration = e.target.value;
+                        setScenesData(updated);
+                      }}
+                      className="flex-1 h-6 text-center border-0 p-0 bg-transparent focus-visible:ring-0"
+                      placeholder="5s"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 hover:bg-secondary"
+                      onClick={() => {
+                        const currentDuration = scene.duration || "5s";
+                        const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
+                        const newValue = numericValue + 1;
+                        const updated = [...scenesData];
+                        updated[index].duration = `${newValue}s`;
+                        setScenesData(updated);
+                      }}
+                    >
+                      <Plus className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div className="h-full flex flex-col">
+            {/* Preview Format Tabs - Fixed at top */}
+            <Tabs value={horizontalPreviewTab} onValueChange={(v) => setHorizontalPreviewTab(v as "horizontal" | "vertical")} className="w-full mb-4 shrink-0">
+              <TabsList className="w-full grid grid-cols-2">
+                <TabsTrigger value="horizontal" className="flex-1 gap-2">
+                  <Monitor className="w-4 h-4" />
+                  Horizontal
+                </TabsTrigger>
+                <TabsTrigger value="vertical" className="flex-1 gap-2">
+                  <Smartphone className="w-4 h-4" />
+                  Vertical
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            
+            {/* Unified Scroll Container for all scene rows */}
+            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
+              <Tabs value={horizontalPreviewTab} onValueChange={(v) => setHorizontalPreviewTab(v as "horizontal" | "vertical")} className="w-full">
+                <TabsContent value="horizontal" className="mt-0">
+                  <div className="space-y-0">
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <SortableContext
+                        items={scenesData.map((s) => s.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {scenesData.map((scene, index) => {
+                          const format = horizontalPreviewTab === "horizontal" ? "16:9" : "9:16";
+                          const renderPreview = (format: "16:9" | "9:16", label: string) => (
+                            <div
+                              key={`${scene.id}-${format}`}
+                              data-scene-preview={index}
+                              className={cn(
+                                "relative rounded-lg border overflow-hidden",
+                                format === "9:16" ? "aspect-[9/16]" : "aspect-video"
+                              )}
+                            >
+                              {scene.mediaUrl && scene.mediaType === 'video' ? (
+                                <video
+                                  src={scene.mediaUrl}
+                                  className="w-full h-full object-cover object-center"
+                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
+                                  muted
+                                  playsInline
+                                />
+                              ) : (
+                                <img
+                                  src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
+                                  alt={`Scene ${scene.id} - ${label}`}
+                                  className="w-full h-full object-cover object-center"
+                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
+                                />
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
+
+                              {/* Caption overlay - Draggable and Resizable */}
+                              {scene.caption && (() => {
+                                const isCaptionSelected = selectedCaptionIndex === index;
+                                const x = scene.captionX || 0;
+                                const y = scene.captionY || 85;
+                                const width = scene.captionWidth || 100;
+                                const height = scene.captionHeight || undefined;
+                                
+                                const handleCaptionClick = (e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  if (isCaptionSelected) {
+                                    setSelectedCaptionIndex(null);
+                                  } else {
+                                    setSelectedCaptionIndex(index);
+                                  }
+                                };
+                                
+                                const handleMouseDown = (e: React.MouseEvent) => {
+                                  if (isCaptionSelected && !isResizingCaption) {
+                                    const container = e.currentTarget.closest('[data-scene-preview]');
+                                    if (container) {
+                                      const rect = container.getBoundingClientRect();
+                                      const offsetX = ((e.clientX - rect.left) / rect.width) * 100 - x;
+                                      const offsetY = ((e.clientY - rect.top) / rect.height) * 100 - y;
+                                      setDragStart({ x: offsetX, y: offsetY });
+                                      setIsDraggingCaption(true);
+                                    }
+                                  }
+                                };
+                                
+                                const handleResizeStart = (e: React.MouseEvent, handle: string) => {
+                                  e.stopPropagation();
+                                  if (isCaptionSelected) {
+                                    setResizeHandle(handle);
+                                    setIsResizingCaption(true);
+                                    const container = e.currentTarget.closest('[data-scene-preview]');
+                                    if (container) {
+                                      const rect = container.getBoundingClientRect();
+                                      setResizeStart({
+                                        x: e.clientX,
+                                        y: e.clientY,
+                                        width: width,
+                                        height: height,
+                                      });
+                                    }
+                                  }
+                                };
+                                
+                                const captionStyle: React.CSSProperties = {
+                                  left: `${x}%`,
+                                  top: `${y}%`,
+                                  width: `${width}%`,
+                                };
+                                if (height !== undefined) {
+                                  captionStyle.height = `${height}%`;
+                                }
+                                
+                                return (
+                                  <div
+                                    className={cn(
+                                      "absolute z-20",
+                                      isCaptionSelected && "cursor-move"
+                                    )}
+                                    style={captionStyle}
+                                    onClick={handleCaptionClick}
+                                    onMouseDown={handleMouseDown}
+                                  >
+                                    {isCaptionSelected && (
+                                      <div className="absolute inset-0 border-2 border-primary rounded pointer-events-none" />
+                                    )}
+                                    
+                                    {(() => {
+                                      const selectedStyle = scene.captionStyle && scene.captionStyle !== "default" 
+                                        ? captionStyles.find(s => s.id === scene.captionStyle)
+                                        : null;
+                                      
+                                      const bgColor = selectedStyle 
+                                        ? selectedStyle.backgroundColor 
+                                        : (scene.captionBackgroundColor || "rgba(0, 0, 0, 0.7)");
+                                      const textColor = selectedStyle 
+                                        ? selectedStyle.textColor 
+                                        : (scene.captionColor || "#FFFFFF");
+                                      const fontFamily = selectedStyle 
+                                        ? selectedStyle.fontFamily 
+                                        : (scene.captionFontFamily || "Inter");
+                                      
+                                      return (
+                                        <div
+                                          className={cn(
+                                            "p-2 rounded cursor-pointer",
+                                            height === undefined ? "min-h-fit" : "h-full",
+                                            isCaptionSelected && bgColor === "transparent" && "border border-primary/30"
+                                          )}
+                                          style={{
+                                            backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
+                                          }}
+                                        >
+                                          <p
+                                            className="font-semibold break-words"
+                                            style={{
+                                              color: textColor,
+                                              fontSize: `${scene.captionFontSize || 16}px`,
+                                              fontFamily: fontFamily,
+                                            }}
+                                          >
+                                            {scene.caption}
+                                          </p>
+                                        </div>
+                                      );
+                                    })()}
+                                    
+                                    {isCaptionSelected && (
+                                      <>
+                                        <div className="absolute -top-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-left')} />
+                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-right')} />
+                                        <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-left')} />
+                                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-right')} />
+                                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top')} />
+                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom')} />
+                                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'left')} />
+                                        <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'right')} />
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                              
+                              <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="gap-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setReplaceVideoSceneIndex(index);
+                                    setIsReplaceVideoDialogOpen(true);
+                                  }}
+                                >
+                                  <Upload className="w-4 h-4" />
+                                  Replace Video
+                                </Button>
+                              </div>
+                            </div>
+                          );
+
+                          return (
+                            <div
+                              key={scene.id}
+                              className={cn(
+                                "flex gap-6 pb-3 border-b border-border/50 last:border-b-0 last:pb-0 w-full",
+                                activeSceneIndex === index && "bg-muted/30"
+                              )}
+                              ref={(node) => {
+                                if (node) {
+                                  sceneRefsMap.current.set(index, node);
+                                } else {
+                                  sceneRefsMap.current.delete(index);
+                                }
+                              }}
+                            >
+                              <div className="w-[300px] shrink-0">
+                                <SortableSceneItem
+                                  scene={scene}
+                                  index={index}
+                                  activeSceneIndex={activeSceneIndex}
+                                  selectedCaptionIndex={selectedCaptionIndex}
+                                  setActiveSceneIndex={(idx) => {
+                                    isUserScrolling.current = true;
+                                    if (scrollTimeoutRef.current) {
+                                      clearTimeout(scrollTimeoutRef.current);
+                                    }
+                                    scrollTimeoutRef.current = setTimeout(() => {
+                                      isUserScrolling.current = false;
+                                    }, 500);
+                                    setActiveSceneIndex(idx);
+                                  }}
+                                  setSelectedCaptionIndex={setSelectedCaptionIndex}
+                                  format={format as "16:9" | "9:16"}
+                                  renderPreview={renderPreview}
+                                  sceneRef={() => {}}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                {renderSceneDetails(scene, index)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </SortableContext>
+                    </DndContext>
+                    <Button
+                      variant="outline"
+                      className="w-full mt-3 border-dashed"
+                      onClick={handleAddScene}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Scene
+                    </Button>
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="vertical" className="mt-0">
+                  <div className="space-y-0">
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <SortableContext
+                        items={scenesData.map((s) => s.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {scenesData.map((scene, index) => {
+                          const format = "9:16";
+                          const renderPreview = (format: "16:9" | "9:16", label: string) => (
+                            <div
+                              key={`${scene.id}-${format}`}
+                              data-scene-preview={index}
+                              className={cn(
+                                "relative rounded-lg border overflow-hidden",
+                                format === "9:16" ? "aspect-[9/16]" : "aspect-video"
+                              )}
+                            >
+                              {scene.mediaUrl && scene.mediaType === 'video' ? (
+                                <video
+                                  src={scene.mediaUrl}
+                                  className="w-full h-full object-cover object-center"
+                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
+                                  muted
+                                  playsInline
+                                />
+                              ) : (
+                                <img
+                                  src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
+                                  alt={`Scene ${scene.id} - ${label}`}
+                                  className="w-full h-full object-cover object-center"
+                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
+                                />
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
+                              {scene.caption && (() => {
+                                const isCaptionSelected = selectedCaptionIndex === index;
+                                const x = scene.captionX || 0;
+                                const y = scene.captionY || 85;
+                                const width = scene.captionWidth || 100;
+                                const height = scene.captionHeight || undefined;
+                                
+                                const handleCaptionClick = (e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  if (isCaptionSelected) {
+                                    setSelectedCaptionIndex(null);
+                                  } else {
+                                    setSelectedCaptionIndex(index);
+                                  }
+                                };
+                                
+                                const handleMouseDown = (e: React.MouseEvent) => {
+                                  if (isCaptionSelected && !isResizingCaption) {
+                                    const container = e.currentTarget.closest('[data-scene-preview]');
+                                    if (container) {
+                                      const rect = container.getBoundingClientRect();
+                                      const offsetX = ((e.clientX - rect.left) / rect.width) * 100 - x;
+                                      const offsetY = ((e.clientY - rect.top) / rect.height) * 100 - y;
+                                      setDragStart({ x: offsetX, y: offsetY });
+                                      setIsDraggingCaption(true);
+                                    }
+                                  }
+                                };
+                                
+                                const handleResizeStart = (e: React.MouseEvent, handle: string) => {
+                                  e.stopPropagation();
+                                  if (isCaptionSelected) {
+                                    setResizeHandle(handle);
+                                    setIsResizingCaption(true);
+                                    const container = e.currentTarget.closest('[data-scene-preview]');
+                                    if (container) {
+                                      const rect = container.getBoundingClientRect();
+                                      setResizeStart({
+                                        x: e.clientX,
+                                        y: e.clientY,
+                                        width: width,
+                                        height: height,
+                                      });
+                                    }
+                                  }
+                                };
+                                
+                                const captionStyle: React.CSSProperties = {
+                                  left: `${x}%`,
+                                  top: `${y}%`,
+                                  width: `${width}%`,
+                                };
+                                if (height !== undefined) {
+                                  captionStyle.height = `${height}%`;
+                                }
+                                
+                                return (
+                                  <div
+                                    className={cn(
+                                      "absolute z-20",
+                                      isCaptionSelected && "cursor-move"
+                                    )}
+                                    style={captionStyle}
+                                    onClick={handleCaptionClick}
+                                    onMouseDown={handleMouseDown}
+                                  >
+                                    {isCaptionSelected && (
+                                      <div className="absolute inset-0 border-2 border-primary rounded pointer-events-none" />
+                                    )}
+                                    {(() => {
+                                      const selectedStyle = scene.captionStyle && scene.captionStyle !== "default" 
+                                        ? captionStyles.find(s => s.id === scene.captionStyle)
+                                        : null;
+                                      const bgColor = selectedStyle 
+                                        ? selectedStyle.backgroundColor 
+                                        : (scene.captionBackgroundColor || "rgba(0, 0, 0, 0.7)");
+                                      const textColor = selectedStyle 
+                                        ? selectedStyle.textColor 
+                                        : (scene.captionColor || "#FFFFFF");
+                                      const fontFamily = selectedStyle 
+                                        ? selectedStyle.fontFamily 
+                                        : (scene.captionFontFamily || "Inter");
+                                      
+                                      return (
+                                        <div
+                                          className={cn(
+                                            "p-2 rounded cursor-pointer",
+                                            height === undefined ? "min-h-fit" : "h-full",
+                                            isCaptionSelected && bgColor === "transparent" && "border border-primary/30"
+                                          )}
+                                          style={{
+                                            backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
+                                          }}
+                                        >
+                                          <p
+                                            className="font-semibold break-words"
+                                            style={{
+                                              color: textColor,
+                                              fontSize: `${scene.captionFontSize || 16}px`,
+                                              fontFamily: fontFamily,
+                                            }}
+                                          >
+                                            {scene.caption}
+                                          </p>
+                                        </div>
+                                      );
+                                    })()}
+                                    {isCaptionSelected && (
+                                      <>
+                                        <div className="absolute -top-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-left')} />
+                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-right')} />
+                                        <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-left')} />
+                                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-right')} />
+                                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top')} />
+                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom')} />
+                                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'left')} />
+                                        <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'right')} />
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                              <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="gap-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setReplaceVideoSceneIndex(index);
+                                    setIsReplaceVideoDialogOpen(true);
+                                  }}
+                                >
+                                  <Upload className="w-4 h-4" />
+                                  Replace Video
+                                </Button>
+                              </div>
+                            </div>
+                          );
+
+                          return (
+                            <div
+                              key={scene.id}
+                              className={cn(
+                                "flex gap-6 pb-3 border-b border-border/50 last:border-b-0 last:pb-0 w-full",
+                                activeSceneIndex === index && "bg-muted/30"
+                              )}
+                              ref={(node) => {
+                                if (node) {
+                                  sceneRefsMap.current.set(index, node);
+                                } else {
+                                  sceneRefsMap.current.delete(index);
+                                }
+                              }}
+                            >
+                              <div className="w-[300px] shrink-0">
+                                <SortableSceneItem
+                                  scene={scene}
+                                  index={index}
+                                  activeSceneIndex={activeSceneIndex}
+                                  selectedCaptionIndex={selectedCaptionIndex}
+                                  setActiveSceneIndex={(idx) => {
+                                    isUserScrolling.current = true;
+                                    if (scrollTimeoutRef.current) {
+                                      clearTimeout(scrollTimeoutRef.current);
+                                    }
+                                    scrollTimeoutRef.current = setTimeout(() => {
+                                      isUserScrolling.current = false;
+                                    }, 500);
+                                    setActiveSceneIndex(idx);
+                                  }}
+                                  setSelectedCaptionIndex={setSelectedCaptionIndex}
+                                  format={format as "16:9" | "9:16"}
+                                  renderPreview={renderPreview}
+                                  sceneRef={() => {}}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                {renderSceneDetails(scene, index)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </SortableContext>
+                    </DndContext>
+                    <Button
+                      variant="outline"
+                      className="w-full mt-3 border-dashed"
+                      onClick={handleAddScene}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Scene
+                    </Button>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </div>
+          );
+
+      case 4: // Final Output
+        return (
+          <div className="h-full flex flex-col p-0 m-0">
+            {formData.format === "both" ? (
+              // Show tabs for both formats
+              <Tabs value={finalOutputTab} onValueChange={(v) => setFinalOutputTab(v as "horizontal" | "vertical")} className="w-full h-full flex flex-col">
+                <TabsList className="w-full max-w-md mx-auto grid grid-cols-2 shrink-0 py-1 px-2">
+                  <TabsTrigger value="horizontal" className="flex-1 gap-2 text-xs py-1.5">
+                    <Monitor className="w-3 h-3" />
+                    Horizontal (16:9)
+                  </TabsTrigger>
+                  <TabsTrigger value="vertical" className="flex-1 gap-2 text-xs py-1.5">
+                    <Smartphone className="w-3 h-3" />
+                    Vertical (9:16)
+                  </TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="horizontal" className="mt-0 flex-1 min-h-0 p-0 m-0 relative">
+                  <div className="absolute inset-0 flex items-center justify-center p-1">
+                    <div className="relative w-full h-full flex items-center justify-center">
+                      <div className="relative bg-black rounded-lg overflow-hidden border-2 border-border" style={{ width: '100%', aspectRatio: '16/9', maxHeight: '100%' }}>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="text-center space-y-4">
+                            <div className="w-16 h-16 mx-auto border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                            <p className="text-muted-foreground">Rendering video...</p>
+                          </div>
+                        </div>
+                        {/* Video preview would go here */}
+                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+                          <div className="text-center space-y-2">
+                            <Play className="w-12 h-12 text-primary/50 mx-auto" />
+                            <p className="text-sm text-muted-foreground">Video Preview</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
+                      <span>Duration: {scenesData.length * 5}s</span>
+                      <span>Scenes: {scenesData.length}</span>
+                    </div>
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="vertical" className="mt-0 flex-1 min-h-0 p-0 m-0 relative">
+                  <div className="absolute inset-0 flex items-center justify-center p-1">
+                    <div className="relative w-full h-full flex items-center justify-center">
+                      <div className="relative bg-black rounded-lg overflow-hidden border-2 border-border" style={{ height: '100%', aspectRatio: '9/16', maxWidth: '100%' }}>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="text-center space-y-4">
+                            <div className="w-16 h-16 mx-auto border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                            <p className="text-muted-foreground">Rendering video...</p>
+                          </div>
+                        </div>
+                        {/* Video preview would go here */}
+                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+                          <div className="text-center space-y-2">
+                            <Play className="w-12 h-12 text-primary/50 mx-auto" />
+                            <p className="text-sm text-muted-foreground">Video Preview</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
+                      <span>Duration: {scenesData.length * 5}s</span>
+                      <span>Scenes: {scenesData.length}</span>
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            ) : formData.format === "16:9" ? (
+              // Show only horizontal video
+              <div className="h-full flex items-center justify-center p-0 m-0 relative">
+                <div className="absolute inset-0 flex items-center justify-center p-1">
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <div className="relative bg-black rounded-lg overflow-hidden border-2 border-border" style={{ width: '100%', aspectRatio: '16/9', maxHeight: '100%' }}>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center space-y-4">
+                          <div className="w-16 h-16 mx-auto border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                          <p className="text-muted-foreground">Rendering video...</p>
+                        </div>
+                      </div>
+                      {/* Video preview would go here */}
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+                        <div className="text-center space-y-2">
+                          <Play className="w-12 h-12 text-primary/50 mx-auto" />
+                          <p className="text-sm text-muted-foreground">Video Preview</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
+                    <span>Duration: {scenesData.length * 5}s</span>
+                    <span>Scenes: {scenesData.length}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // Show only vertical video
+              <div className="h-full flex items-center justify-center p-0 m-0 relative">
+                <div className="absolute inset-0 flex items-center justify-center p-1">
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <div className="relative bg-black rounded-lg overflow-hidden border-2 border-border" style={{ height: '100%', aspectRatio: '9/16', maxWidth: '100%' }}>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center space-y-4">
+                          <div className="w-16 h-16 mx-auto border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                          <p className="text-muted-foreground">Rendering video...</p>
+                        </div>
+                      </div>
+                      {/* Video preview would go here */}
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+                        <div className="text-center space-y-2">
+                          <Play className="w-12 h-12 text-primary/50 mx-auto" />
+                          <p className="text-sm text-muted-foreground">Video Preview</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
+                    <span>Duration: {scenesData.length * 5}s</span>
+                    <span>Scenes: {scenesData.length}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -70,14 +2629,27 @@ export function VideoCreationForm({
       <header className="relative z-10 border-b border-border bg-card/50 backdrop-blur-xl sticky top-0">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={onBack}>
+            <Button variant="ghost" size="icon" onClick={handleClose}>
               <ArrowLeft className="w-5 h-5" />
             </Button>
-            <OptimusLogo />
+            <div>
+              <h1 className="font-display text-2xl font-bold tracking-tight">
+                <span className="text-black dark:text-white">OPTIMUS</span>
+              </h1>
+              <p className="text-xs text-muted-foreground -mt-0.5">AI Video Studio</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <Button variant="outline" onClick={onBack}>
+            <div className="flex items-center gap-2">
+              <Moon className="w-4 h-4 text-muted-foreground" />
+              <Switch
+                checked={theme === "dark"}
+                onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+                aria-label="Toggle theme"
+              />
+              <Sun className="w-4 h-4 text-muted-foreground" />
+            </div>
+            <Button variant="outline" onClick={handleClose}>
               Cancel
             </Button>
             <Button variant="secondary" onClick={onPreview} className="gap-2">
@@ -113,248 +2685,1411 @@ export function VideoCreationForm({
               </p>
             </div>
           </div>
+        </motion.div>
+      </main>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left column - Metadata */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Section A: Video Metadata */}
-              <div className="p-6 rounded-xl border border-border bg-card">
-                <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
-                    A
+      {/* Step Modal */}
+      <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] max-h-[90vh] flex flex-col p-0" onInteractOutside={(e) => e.preventDefault()}>
+          {/* Step Indicator Header */}
+          <div className="px-6 pt-6 pb-3 border-b border-border">
+            {/* Step Indicator */}
+            <div className="flex items-center">
+              {steps
+                .filter((step, index) => {
+                  // Filter steps based on format
+                  if (formData.format === "9:16" && step.key === "horizontalPreview") {
+                    return false; // Hide horizontal preview for 9:16 format
+                  }
+                  return true;
+                })
+                .map((step, filteredIndex, filteredSteps) => {
+                  // Map the filtered index back to original index for currentStep comparison
+                  const originalIndex = steps.findIndex(s => s.id === step.id);
+                  return (
+                <div key={step.id} className="flex items-center flex-1">
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold transition-all ${
+                            originalIndex < currentStep
+                          ? "bg-success text-success-foreground"
+                              : originalIndex === currentStep
+                          ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+                          : "bg-secondary border border-border text-muted-foreground"
+                      }`}
+                    >
+                          {originalIndex < currentStep ? (
+                        <Check className="w-3 h-3" />
+                      ) : (
+                        <span className="w-2 h-2 rounded-full bg-current" />
+                      )}
+                    </div>
+                    <span
+                      className={`mt-2 text-[10px] font-semibold uppercase tracking-wide ${
+                            originalIndex === currentStep ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                    </div>
+                      {filteredIndex < filteredSteps.length - 1 && (
+                    <div className="flex-1 h-0.5 mx-3 bg-border relative">
+                          {originalIndex < currentStep && (
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: "100%" }}
+                          className="absolute inset-0 bg-success"
+                        />
+                      )}
+                  </div>
+                )}
+                    </div>
+                  );
+                })}
+                    </div>
+                  </div>
+
+          {/* Modal Content */}
+          <div className={`flex-1 min-h-0 ${currentStep === 4 ? 'overflow-hidden px-0 py-0' : currentStep === 3 ? 'overflow-hidden px-6 py-2' : 'overflow-y-auto px-6 py-2'}`}>
+            <div className={`${currentStep === 3 ? 'h-full min-h-0' : 'h-full min-h-0 overflow-hidden'}`}>{renderStepContent()}</div>
+              </div>
+
+          <DialogFooter className="flex justify-between items-center px-6 py-4 border-t border-border">
+            <div className="flex items-center gap-6">
+              {currentStep === 3 && (
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <span>
+                    <span className="font-medium text-foreground">Total Scenes:</span> {scenesData.length}
                   </span>
-                  Video Metadata
-                </h2>
+                    <span>
+                    <span className="font-medium text-foreground">Video Duration:</span> {scenesData.length * 5}s
+                  </span>
+                </div>
+              )}
+              {/* AI Voice - Only shown in 4th tab (Horizontal Preview) */}
+              {currentStep === 3 && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">AI Voice</Label>
+                  <Select
+                    value={selectedAiVoice}
+                    onValueChange={(value) => {
+                      setSelectedAiVoice(value);
+                      if (aiVoiceAudioRef.current) {
+                        aiVoiceAudioRef.current.pause();
+                        aiVoiceAudioRef.current.currentTime = 0;
+                        setIsAiVoicePlaying(false);
+                        setPreviewVoiceId(null);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-[200px] h-9">
+                      <SelectValue>
+                        {aiVoices.find(v => v.id === selectedAiVoice)?.name || "Select AI Voice"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {aiVoices.map((voice) => (
+                        <SelectItem key={voice.id} value={voice.id}>
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <div className="flex items-center gap-2">
+                              <span>{voice.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                ({voice.gender} • {voice.accent})
+                              </span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                if (previewVoiceId === voice.id && isAiVoicePlaying) {
+                                  if (aiVoiceAudioRef.current) {
+                                    aiVoiceAudioRef.current.pause();
+                                    setIsAiVoicePlaying(false);
+                                    setPreviewVoiceId(null);
+                                  }
+                                } else {
+                                  setPreviewVoiceId(voice.id);
+                                  if (aiVoiceAudioRef.current) {
+                                    aiVoiceAudioRef.current.src = `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${voice.id.replace('voice', '') || '2'}.mp3`;
+                                    aiVoiceAudioRef.current.play();
+                                    setIsAiVoicePlaying(true);
+                                  }
+                                }
+                              }}
+                              title="Preview voice"
+                            >
+                              {previewVoiceId === voice.id && isAiVoicePlaying ? (
+                                <Pause className="w-3 h-3" />
+                              ) : (
+                                <Volume2 className="w-3 h-3" />
+                              )}
+                            </Button>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <audio
+                    ref={aiVoiceAudioRef}
+                    onEnded={() => {
+                      setIsAiVoicePlaying(false);
+                      setPreviewVoiceId(null);
+                      if (aiVoiceAudioRef.current) {
+                        aiVoiceAudioRef.current.currentTime = 0;
+                      }
+                    }}
+                    onPause={() => setIsAiVoicePlaying(false)}
+                    onPlay={() => setIsAiVoicePlaying(true)}
+                    src={`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${(previewVoiceId || selectedAiVoice).replace('voice', '') || '2'}.mp3`}
+                  />
+                </div>
+              )}
+              <Button variant="outline" onClick={handleBack}>
+                {currentStep === 0 ? "Cancel" : "Back"}
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              {currentStep === steps.length - 1 ? (
+                <>
+                  <Button onClick={() => {
+                    setIsOpen(false);
+                    onPreview();
+                  }}>
+                    Quick Edit
+                  </Button>
+                  <Button variant="outline" onClick={() => {
+                    setIsOpen(false);
+                    onAdvancedEdit();
+                  }}>
+                    Advanced Edit
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  onClick={handleNext}
+                  disabled={
+                    (currentStep === 1 && (
+                      formData.format === "both" 
+                        ? templateFormatTab === "horizontal"
+                          ? !formData.selectedTheme16x9
+                          : !formData.selectedTheme16x9 || !formData.selectedTheme9x16
+                        : formData.format === "16:9"
+                        ? !formData.selectedTheme16x9
+                        : !formData.selectedTheme9x16
+                    )) ||
+                    (currentStep === 2 && !formData.backgroundMusic)
+                  }
+                >
+                  Next
+                </Button>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
+      {/* Replace Video Dialog */}
+      <Dialog open={isReplaceVideoDialogOpen} onOpenChange={(open) => {
+        setIsReplaceVideoDialogOpen(open);
+        if (!open) {
+          setReplaceVideoSceneIndex(null);
+          setReplaceVideoTab("upload");
+          setReplaceVideoSearchQuery("");
+          setSelectedVideoForTrim(null);
+          setVideoTrimStartTime("00:00");
+          setVideoTrimEndTime("00:00");
+          setVideoTrimCurrentTime(0);
+          setIsVideoTrimPlaying(false);
+          if (videoTrimRef.current) {
+            videoTrimRef.current.pause();
+            videoTrimRef.current.currentTime = 0;
+          }
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Replace Video</DialogTitle>
+            <DialogDescription>
+              Choose how you want to replace the video for this scene
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <Tabs value={replaceVideoTab} onValueChange={(v) => setReplaceVideoTab(v as "upload" | "slike")}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="upload">Upload</TabsTrigger>
+                <TabsTrigger value="slike">Slike</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="upload" className="mt-4">
                 <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="title">Video Title</Label>
+                  <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+                    <label className="cursor-pointer">
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file && replaceVideoSceneIndex !== null) {
+                            const url = URL.createObjectURL(file);
+                            const updated = [...scenesData];
+                            updated[replaceVideoSceneIndex] = {
+                              ...updated[replaceVideoSceneIndex],
+                              mediaUrl: url,
+                              mediaType: file.type.startsWith('video/') ? 'video' : 'image',
+                              thumbnail: file.type.startsWith('video/') ? updated[replaceVideoSceneIndex].thumbnail : url,
+                            };
+                            setScenesData(updated);
+                            setIsReplaceVideoDialogOpen(false);
+                            setReplaceVideoSceneIndex(null);
+                          }
+                        }}
+                      />
+                      <div className="flex flex-col items-center gap-3">
+                        <Upload className="w-12 h-12 text-muted-foreground" />
+                        <div>
+                          <p className="text-sm font-medium">Click to upload or drag and drop</p>
+                          <p className="text-xs text-muted-foreground mt-1">Image or Video files</p>
+                        </div>
+                        <Button variant="outline" size="sm">
+                          Select File
+                        </Button>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="slike" className="mt-4">
+                <div className="space-y-4">
+                  {/* Search within Slike tab */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
-                      id="title"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      className="mt-1.5"
+                      placeholder="Search Slike videos..."
+                      value={replaceVideoSearchQuery}
+                      onChange={(e) => setReplaceVideoSearchQuery(e.target.value)}
+                      className="pl-10"
                     />
                   </div>
-
-                  <div>
-                    <Label htmlFor="description">Video Description</Label>
-                    <Textarea
-                      id="description"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      className="mt-1.5 min-h-[80px]"
-                    />
+                  <div className="grid grid-cols-3 gap-4">
+                    {slikeVideos
+                      .filter((video) =>
+                        video.title.toLowerCase().includes(replaceVideoSearchQuery.toLowerCase())
+                      )
+                      .map((video) => (
+                        <div
+                          key={video.id}
+                          className={cn(
+                            "relative rounded-lg border overflow-hidden cursor-pointer hover:border-primary transition-colors",
+                            selectedVideoForTrim?.id === video.id ? "border-primary ring-2 ring-primary/30" : "border-border"
+                          )}
+                          onClick={() => {
+                            setSelectedVideoForTrim(video);
+                            // Parse duration to set end time
+                            const durationParts = video.duration.split(":");
+                            const durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            setVideoTrimEndTime(video.duration);
+                            setVideoTrimStartTime("00:00");
+                            setVideoTrimCurrentTime(0);
+                            setIsVideoTrimPlaying(false);
+                            // Close Replace Video dialog and open Trim dialog
+                            setIsReplaceVideoDialogOpen(false);
+                            setIsVideoTrimDialogOpen(true);
+                          }}
+                        >
+                          <div className="aspect-video relative">
+                            <img
+                              src={video.thumbnail}
+                              alt={video.title}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute bottom-0 left-0 right-0 bg-background/90 px-2 py-1">
+                              <p className="text-xs font-medium truncate">{video.title}</p>
+                              <p className="text-[10px] text-muted-foreground">{video.duration}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                   </div>
+                  {replaceVideoSearchQuery && slikeVideos.filter((video) =>
+                    video.title.toLowerCase().includes(replaceVideoSearchQuery.toLowerCase())
+                  ).length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>No videos found matching "{replaceVideoSearchQuery}"</p>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="keywords">Keywords / Tags</Label>
-                      <Input
-                        id="keywords"
-                        value={keywords}
-                        onChange={(e) => setKeywords(e.target.value)}
-                        className="mt-1.5"
+      {/* Video Trimming Dialog */}
+      <Dialog open={isVideoTrimDialogOpen} onOpenChange={(open) => {
+        setIsVideoTrimDialogOpen(open);
+        if (!open) {
+          setSelectedVideoForTrim(null);
+          setVideoTrimStartTime("00:00");
+          setVideoTrimEndTime("00:00");
+          setVideoTrimCurrentTime(0);
+          setIsVideoTrimPlaying(false);
+          setIsVideoTrimMuted(true);
+          if (videoTrimRef.current) {
+            videoTrimRef.current.pause();
+            videoTrimRef.current.currentTime = 0;
+            videoTrimRef.current.muted = true;
+          }
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Set In/Out Points</DialogTitle>
+            {selectedVideoForTrim && (
+              <DialogDescription>
+                {selectedVideoForTrim.title}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          
+          {selectedVideoForTrim && (
+            <div className="mt-4 space-y-4">
+              {/* Video Player */}
+              <div 
+                className="relative rounded-lg border border-border overflow-hidden bg-black"
+                onMouseEnter={() => setIsHoveringVideoTrim(true)}
+                onMouseLeave={() => setIsHoveringVideoTrim(false)}
+              >
+                <video
+                  ref={videoTrimRef}
+                  src={selectedVideoForTrim.thumbnail}
+                  className="w-full aspect-video"
+                  muted={isVideoTrimMuted}
+                  onTimeUpdate={(e) => {
+                    const video = e.currentTarget;
+                    const currentSeconds = Math.floor(video.currentTime);
+                    setVideoTrimCurrentTime(currentSeconds);
+                    // Stop at end time
+                    const endSeconds = parseTime(videoTrimEndTime);
+                    if (video.currentTime >= endSeconds) {
+                      video.pause();
+                      setIsVideoTrimPlaying(false);
+                      video.currentTime = endSeconds;
+                    }
+                  }}
+                  onLoadedMetadata={(e) => {
+                    const video = e.currentTarget;
+                    const durationParts = selectedVideoForTrim.duration.split(":");
+                    const durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                    if (video.duration && video.duration > 0) {
+                      setVideoTrimEndTime(formatTime(Math.min(durationSeconds, Math.floor(video.duration))));
+                    } else {
+                      // If video metadata not available, use the duration from the video object
+                      setVideoTrimEndTime(selectedVideoForTrim.duration);
+                    }
+                  }}
+                />
+                
+                {/* Progress Bar on Hover */}
+                {isHoveringVideoTrim && (
+                  <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent">
+                    <div 
+                      className="relative h-2 bg-secondary/50 rounded-full cursor-pointer"
+                      onClick={(e) => {
+                        if (videoTrimRef.current) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const clickX = e.clientX - rect.left;
+                          const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+                          const durationParts = selectedVideoForTrim.duration.split(":");
+                          const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                          const newTime = percentage * maxDuration;
+                          videoTrimRef.current.currentTime = newTime;
+                          setVideoTrimCurrentTime(Math.floor(newTime));
+                        }
+                      }}
+                    >
+                      {/* Progress indicator */}
+                      <div 
+                        className="absolute left-0 top-0 bottom-0 bg-primary rounded-full"
+                        style={{
+                          width: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            return maxDuration > 0 ? (videoTrimCurrentTime / maxDuration) * 100 : 0;
+                          })()}%`
+                        }}
+                      />
+                      {/* Start time marker */}
+                      <div 
+                        className="absolute top-1/2 -translate-y-1/2 w-1 h-4 bg-green-500 rounded-full cursor-ew-resize z-10"
+                        style={{
+                          left: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            const startSeconds = parseTime(videoTrimStartTime);
+                            return maxDuration > 0 ? (startSeconds / maxDuration) * 100 : 0;
+                          })()}%`,
+                          transform: 'translateX(-50%) translateY(-50%)'
+                        }}
+                        title={`Start: ${videoTrimStartTime}`}
+                      />
+                      {/* End time marker */}
+                      <div 
+                        className="absolute top-1/2 -translate-y-1/2 w-1 h-4 bg-red-500 rounded-full cursor-ew-resize z-10"
+                        style={{
+                          left: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            const endSeconds = parseTime(videoTrimEndTime);
+                            return maxDuration > 0 ? (endSeconds / maxDuration) * 100 : 0;
+                          })()}%`,
+                          transform: 'translateX(-50%) translateY(-50%)'
+                        }}
+                        title={`End: ${videoTrimEndTime}`}
+                      />
+                      {/* Current time indicator */}
+                      <div 
+                        className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full cursor-pointer z-20 shadow-lg"
+                        style={{
+                          left: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            return maxDuration > 0 ? (videoTrimCurrentTime / maxDuration) * 100 : 0;
+                          })()}%`,
+                          transform: 'translateX(-50%) translateY(-50%)'
+                        }}
                       />
                     </div>
-                    <div>
-                      <Label htmlFor="category">Category</Label>
-                      <Select value={category} onValueChange={setCategory}>
-                        <SelectTrigger className="mt-1.5">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Economy">Economy</SelectItem>
-                          <SelectItem value="Politics">Politics</SelectItem>
-                          <SelectItem value="Sports">Sports</SelectItem>
-                          <SelectItem value="Technology">Technology</SelectItem>
-                          <SelectItem value="Entertainment">Entertainment</SelectItem>
-                        </SelectContent>
-                      </Select>
+                    {/* Time labels - positioned relative to markers */}
+                    <div className="relative mt-2 h-4">
+                      {/* Start time label - positioned at start marker */}
+                      <div 
+                        className="absolute top-0 text-xs text-white/90 whitespace-nowrap"
+                        style={{
+                          left: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            const startSeconds = parseTime(videoTrimStartTime);
+                            return maxDuration > 0 ? (startSeconds / maxDuration) * 100 : 0;
+                          })()}%`,
+                          transform: 'translateX(-50%)'
+                        }}
+                      >
+                        {videoTrimStartTime}
+                      </div>
+                      {/* Current time label - positioned at current position indicator */}
+                      <div 
+                        className="absolute top-0 text-xs text-white/90 whitespace-nowrap"
+                        style={{
+                          left: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            return maxDuration > 0 ? (videoTrimCurrentTime / maxDuration) * 100 : 0;
+                          })()}%`,
+                          transform: 'translateX(-50%)'
+                        }}
+                      >
+                        {formatTime(videoTrimCurrentTime)}
+                      </div>
+                      {/* End time label - positioned at end marker */}
+                      <div 
+                        className="absolute top-0 text-xs text-white/90 whitespace-nowrap"
+                        style={{
+                          left: `${(() => {
+                            const durationParts = selectedVideoForTrim.duration.split(":");
+                            const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                            const endSeconds = parseTime(videoTrimEndTime);
+                            return maxDuration > 0 ? (endSeconds / maxDuration) * 100 : 0;
+                          })()}%`,
+                          transform: 'translateX(-50%)'
+                        }}
+                      >
+                        {videoTrimEndTime}
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
+              
+              {/* Timeline Bar with Green Markers */}
+              <div className="relative flex items-center gap-2">
+                <div 
+                  className="relative flex-1 h-12 rounded-lg overflow-hidden cursor-pointer bg-gray-200"
+                  onClick={(e) => {
+                    if (videoTrimRef.current) {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const clickX = e.clientX - rect.left;
+                      const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+                      const durationParts = selectedVideoForTrim.duration.split(":");
+                      const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                      const newTime = percentage * maxDuration;
+                      videoTrimRef.current.currentTime = newTime;
+                      setVideoTrimCurrentTime(Math.floor(newTime));
+                    }
+                  }}
+                >
+                  {/* Pre-slate area (left of selected segment) */}
+                  <div 
+                    className="absolute left-0 top-0 bottom-0 bg-gray-300"
+                    style={{
+                      width: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const startSeconds = parseTime(videoTrimStartTime);
+                        return maxDuration > 0 ? (startSeconds / maxDuration) * 100 : 0;
+                      })()}%`
+                    }}
+                  />
+                  
+                  {/* Selected segment (between start and end) - dark gray */}
+                  <div 
+                    className="absolute top-0 bottom-0 bg-gray-600"
+                    style={{
+                      left: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const startSeconds = parseTime(videoTrimStartTime);
+                        return maxDuration > 0 ? (startSeconds / maxDuration) * 100 : 0;
+                      })()}%`,
+                      width: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const startSeconds = parseTime(videoTrimStartTime);
+                        const endSeconds = parseTime(videoTrimEndTime);
+                        return maxDuration > 0 ? ((endSeconds - startSeconds) / maxDuration) * 100 : 0;
+                      })()}%`
+                    }}
+                  />
+                  
+                  {/* Post-slate area (right of selected segment) */}
+                  <div 
+                    className="absolute right-0 top-0 bottom-0 bg-gray-300"
+                    style={{
+                      width: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const endSeconds = parseTime(videoTrimEndTime);
+                        return maxDuration > 0 ? ((maxDuration - endSeconds) / maxDuration) * 100 : 0;
+                      })()}%`
+                    }}
+                  />
+                  
+                  {/* Start marker (green arrow) */}
+                  <div 
+                    className="absolute top-0 -translate-x-1/2 z-10 cursor-ew-resize"
+                    style={{
+                      left: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const startSeconds = parseTime(videoTrimStartTime);
+                        return maxDuration > 0 ? (startSeconds / maxDuration) * 100 : 0;
+                      })()}%`
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const durationParts = selectedVideoForTrim.duration.split(":");
+                      const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                      const startSeconds = parseTime(videoTrimStartTime);
+                      const initialLeft = (startSeconds / maxDuration) * 100;
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        const rect = e.currentTarget.parentElement?.getBoundingClientRect();
+                        if (rect) {
+                          const deltaX = moveEvent.clientX - startX;
+                          const deltaPercent = (deltaX / rect.width) * 100;
+                          const newPercent = Math.max(0, Math.min(100, initialLeft + deltaPercent));
+                          const newSeconds = Math.floor((newPercent / 100) * maxDuration);
+                          const newTime = formatTime(newSeconds);
+                          setVideoTrimStartTime(newTime);
+                          if (videoTrimRef.current) {
+                            videoTrimRef.current.currentTime = newSeconds;
+                            setVideoTrimCurrentTime(newSeconds);
+                          }
+                        }
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                      };
+                      
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    }}
+                  >
+                    <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[8px] border-b-green-500" />
+                  </div>
+                  
+                  {/* End marker (green arrow) */}
+                  <div 
+                    className="absolute top-0 -translate-x-1/2 z-10 cursor-ew-resize"
+                    style={{
+                      left: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const endSeconds = parseTime(videoTrimEndTime);
+                        return maxDuration > 0 ? (endSeconds / maxDuration) * 100 : 0;
+                      })()}%`
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const durationParts = selectedVideoForTrim.duration.split(":");
+                      const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                      const endSeconds = parseTime(videoTrimEndTime);
+                      const initialLeft = (endSeconds / maxDuration) * 100;
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        const rect = e.currentTarget.parentElement?.getBoundingClientRect();
+                        if (rect) {
+                          const deltaX = moveEvent.clientX - startX;
+                          const deltaPercent = (deltaX / rect.width) * 100;
+                          const newPercent = Math.max(0, Math.min(100, initialLeft + deltaPercent));
+                          const newSeconds = Math.floor((newPercent / 100) * maxDuration);
+                          const newTime = formatTime(newSeconds);
+                          setVideoTrimEndTime(newTime);
+                          if (videoTrimRef.current) {
+                            videoTrimRef.current.currentTime = newSeconds;
+                            setVideoTrimCurrentTime(newSeconds);
+                          }
+                        }
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                      };
+                      
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    }}
+                  >
+                    <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[8px] border-b-green-500" />
+                  </div>
+                  
+                  {/* Red circular playhead at current position with green vertical line */}
+                  <div 
+                    className="absolute top-0 -translate-x-1/2 z-20"
+                    style={{
+                      left: `${(() => {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        return maxDuration > 0 ? (videoTrimCurrentTime / maxDuration) * 100 : 0;
+                      })()}%`
+                    }}
+                  >
+                    {/* Green vertical line extending upward */}
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0.5 h-4 bg-green-500" />
+                    {/* Red circle */}
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-md" />
+                  </div>
+                </div>
+                
+                {/* Add Button */}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-12 w-12 rounded-md bg-blue-500 hover:bg-blue-600 border-blue-600"
+                >
+                  <Plus className="w-5 h-5 text-white" />
+                </Button>
+              </div>
+              
+              {/* Time Controls */}
+              <div className="flex items-end gap-4">
+                {/* Start Time */}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Start</Label>
+                  <Input
+                    type="text"
+                    value={videoTrimStartTime}
+                    onChange={(e) => {
+                      setVideoTrimStartTime(e.target.value);
+                      if (videoTrimRef.current) {
+                        const seconds = parseTime(e.target.value);
+                        videoTrimRef.current.currentTime = seconds;
+                        setVideoTrimCurrentTime(seconds);
+                      }
+                    }}
+                    className="w-20 h-9 text-center text-sm font-semibold bg-white border-border rounded-md"
+                    placeholder="00:00"
+                  />
+                </div>
+                
+                {/* End Time */}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">End</Label>
+                  <Input
+                    type="text"
+                    value={videoTrimEndTime}
+                    onChange={(e) => {
+                      setVideoTrimEndTime(e.target.value);
+                      if (videoTrimRef.current) {
+                        const seconds = parseTime(e.target.value);
+                        videoTrimRef.current.currentTime = seconds;
+                        setVideoTrimCurrentTime(seconds);
+                      }
+                    }}
+                    className="w-20 h-9 text-center text-sm font-semibold bg-white border-border rounded-md"
+                    placeholder="00:00"
+                  />
+                </div>
+                
+                {/* Playback Controls */}
+                <div className="flex items-center gap-1">
+                  {/* Skip Backward (two lines + left triangle) */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        videoTrimRef.current.currentTime = 0;
+                        setVideoTrimCurrentTime(0);
+                        setVideoTrimStartTime("00:00");
+                      }
+                    }}
+                    title="Skip to start"
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <div className="w-0.5 h-3 bg-white rounded" />
+                      <div className="w-0.5 h-3 bg-white rounded" />
+                      <ChevronLeft className="w-3 h-3 text-white" />
+                    </div>
+                  </Button>
+                  
+                  {/* Rewind (one line + left triangle) */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        const newTime = Math.max(0, videoTrimCurrentTime - 1);
+                        videoTrimRef.current.currentTime = newTime;
+                        setVideoTrimCurrentTime(newTime);
+                        setVideoTrimStartTime(formatTime(newTime));
+                      }
+                    }}
+                    title="1 second backward"
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <div className="w-0.5 h-3 bg-white rounded" />
+                      <ChevronLeft className="w-3 h-3 text-white" />
+                    </div>
+                  </Button>
+                  
+                  {/* Play/Pause */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 rounded-md bg-gray-700 hover:bg-gray-600 border-2 border-blue-500"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        if (isVideoTrimPlaying) {
+                          videoTrimRef.current.pause();
+                          setIsVideoTrimPlaying(false);
+                        } else {
+                          const startSeconds = parseTime(videoTrimStartTime);
+                          videoTrimRef.current.currentTime = startSeconds;
+                          videoTrimRef.current.play();
+                          setIsVideoTrimPlaying(true);
+                        }
+                      }
+                    }}
+                  >
+                    {isVideoTrimPlaying ? (
+                      <Pause className="w-4 h-4 text-white" />
+                    ) : (
+                      <Play className="w-4 h-4 ml-0.5 text-white" />
+                    )}
+                  </Button>
+                  
+                  {/* Fast Forward (right triangle + one line) */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const newTime = Math.min(maxDuration, videoTrimCurrentTime + 1);
+                        videoTrimRef.current.currentTime = newTime;
+                        setVideoTrimCurrentTime(newTime);
+                        setVideoTrimEndTime(formatTime(newTime));
+                      }
+                    }}
+                    title="1 second forward"
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <ChevronRight className="w-3 h-3 text-white" />
+                      <div className="w-0.5 h-3 bg-white rounded" />
+                    </div>
+                  </Button>
+                  
+                  {/* Skip Forward (right triangle + two lines) */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        videoTrimRef.current.currentTime = maxDuration;
+                        setVideoTrimCurrentTime(maxDuration);
+                        setVideoTrimEndTime(selectedVideoForTrim.duration);
+                      }
+                    }}
+                    title="Skip to end"
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <ChevronRight className="w-3 h-3 text-white" />
+                      <div className="w-0.5 h-3 bg-white rounded" />
+                      <div className="w-0.5 h-3 bg-white rounded" />
+                    </div>
+                  </Button>
+                </div>
+                
+                {/* Mute Button */}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 rounded-md bg-gray-100 hover:bg-gray-200 border-gray-300"
+                  onClick={() => {
+                    if (videoTrimRef.current) {
+                      videoTrimRef.current.muted = !isVideoTrimMuted;
+                      setIsVideoTrimMuted(!isVideoTrimMuted);
+                    }
+                  }}
+                  title={isVideoTrimMuted ? "Unmute" : "Mute"}
+                >
+                  {isVideoTrimMuted ? (
+                    <VolumeX className="w-4 h-4 text-gray-700" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-gray-700" />
+                  )}
+                </Button>
+                
+                <div className="flex-1" />
+                
+                {/* Apply Button */}
+                <Button
+                  onClick={() => {
+                    if (replaceVideoSceneIndex !== null && selectedVideoForTrim) {
+                      const updated = [...scenesData];
+                      updated[replaceVideoSceneIndex] = {
+                        ...updated[replaceVideoSceneIndex],
+                        mediaUrl: selectedVideoForTrim.thumbnail,
+                        mediaType: 'video',
+                        thumbnail: selectedVideoForTrim.thumbnail,
+                      };
+                      setScenesData(updated);
+                      setIsVideoTrimDialogOpen(false);
+                      setReplaceVideoSceneIndex(null);
+                      setSelectedVideoForTrim(null);
+                      setVideoTrimStartTime("00:00");
+                      setVideoTrimEndTime("00:00");
+                      setVideoTrimCurrentTime(0);
+                      setIsVideoTrimPlaying(false);
+                      if (videoTrimRef.current) {
+                        videoTrimRef.current.pause();
+                        videoTrimRef.current.currentTime = 0;
+                      }
+                    }
+                  }}
+                  className="h-9"
+                >
+                  Apply
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="slides">Number of Slides</Label>
-                      <Select value={slides} onValueChange={setSlides}>
-                        <SelectTrigger className="mt-1.5">
+      {/* Template Selection Dialog */}
+      <Dialog open={isTemplateDialogOpen} onOpenChange={setIsTemplateDialogOpen}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Change Template</DialogTitle>
+            <DialogDescription>
+              Select a template for your {currentStep === 3 ? "horizontal" : "vertical"} video format
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            {currentStep === 3 ? (
+              // Horizontal Preview - show 16:9 templates
+              <div className="grid grid-cols-4 gap-4">
+                {themes.map((theme) => (
+                  <ThemeCard
+                    key={theme.id}
+                    name={theme.name}
+                    preview={theme.preview}
+                    format="16:9"
+                    selected={formData.selectedTheme16x9 === theme.id}
+                    onClick={() => {
+                      setFormData({ ...formData, selectedTheme16x9: theme.id });
+                      setIsTemplateDialogOpen(false);
+                    }}
+                    delay={0}
+                    category={theme.category}
+                  />
+                ))}
+              </div>
+            ) : (
+              // Vertical Preview - show 9:16 templates
+              <div className="grid grid-cols-5 gap-4">
+                {verticalThemes.map((theme) => (
+                  <ThemeCard
+                    key={theme.id}
+                    name={theme.name}
+                    preview={theme.preview}
+                    format="9:16"
+                    selected={formData.selectedTheme9x16 === theme.id}
+                    onClick={() => {
+                      setFormData({ ...formData, selectedTheme9x16: theme.id });
+                      setIsTemplateDialogOpen(false);
+                    }}
+                    delay={0}
+                    category={theme.category}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Video Player Dialog */}
+      <Dialog open={!!selectedVideoForEdit} onOpenChange={(open) => !open && setSelectedVideoForEdit(null)}>
+        <DialogContent className="max-w-6xl w-[98vw] h-[95vh] max-h-[95vh] p-0 bg-gradient-to-b from-gray-950 to-black flex flex-col border border-gray-800/50 shadow-2xl">
+          {/* Mouse move handler for dragging */}
+          {selectedVideoForEdit && (isDraggingStart || isDraggingEnd || isDraggingCurrent) && (
+            <div
+              className="fixed inset-0 z-50 cursor-move"
+              onMouseMove={(e) => {
+                const timeline = document.querySelector('[data-timeline]') as HTMLElement;
+                if (timeline) {
+                  const rect = timeline.getBoundingClientRect();
+                  const x = e.clientX - rect.left;
+                  const percentage = Math.max(0, Math.min(1, x / rect.width));
+                  const totalDuration = parseTime(selectedVideoForEdit.duration);
+                  const newTime = Math.floor(percentage * totalDuration);
+                  
+                  if (isDraggingStart) {
+                    const endTime = parseTime(videoEndTime);
+                    if (newTime < endTime) {
+                      setVideoStartTime(formatTime(newTime));
+                      setVideoCurrentTime(newTime);
+                    }
+                  } else if (isDraggingEnd) {
+                    const startTime = parseTime(videoStartTime);
+                    if (newTime > startTime) {
+                      setVideoEndTime(formatTime(newTime));
+                      setVideoCurrentTime(newTime);
+                    }
+                  } else if (isDraggingCurrent) {
+                    setVideoCurrentTime(newTime);
+                  }
+                }
+              }}
+              onMouseUp={() => {
+                setIsDraggingStart(false);
+                setIsDraggingEnd(false);
+                setIsDraggingCurrent(false);
+              }}
+            />
+          )}
+          {selectedVideoForEdit && (
+            <div 
+              className="flex flex-col h-full min-h-0"
+              onMouseEnter={() => setIsHoveringVideo(true)}
+              onMouseLeave={() => setIsHoveringVideo(false)}
+            >
+              {/* Video Player */}
+              <div 
+                className="relative flex-1 bg-gradient-to-br from-gray-900 via-black to-gray-900 flex items-center justify-center min-h-0"
+              >
+                {/* Top Right Controls - Close button */}
+                <div className="absolute top-5 right-5 z-10">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setSelectedVideoForEdit(null)}
+                    className="text-white hover:bg-red-500/20 bg-white/10 rounded-full h-9 w-9 transition-all duration-200 hover:scale-110 shadow-lg"
+                  >
+                    <X className="w-4.5 h-4.5" />
+                  </Button>
+                </div>
+
+                {/* Video Display Area */}
+                <div className="relative w-full h-full flex items-center justify-center p-6">
+                  <div className={`relative shadow-2xl rounded-xl overflow-hidden border border-gray-700/50 ${
+                    selectedVideoForEdit.isVertical === true
+                      ? "aspect-[9/16] w-[30%] max-w-[400px]" 
+                      : "aspect-video w-full max-w-[92%]"
+                  }`}>
+                    <img
+                      src={selectedVideoForEdit.thumbnail}
+                      alt={selectedVideoForEdit.title}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
+                    
+                    {/* Progress Bar Overlay - Show on hover */}
+                    <div className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${isHoveringVideo ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}>
+                      <div className="bg-gradient-to-t from-black/90 via-black/70 to-transparent px-4 py-3">
+                        {/* Progress Bar */}
+                        <div 
+                          className="relative h-1.5 bg-white/30 rounded-full cursor-pointer group"
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const clickX = e.clientX - rect.left;
+                            const percentage = clickX / rect.width;
+                            const totalDuration = parseTime(selectedVideoForEdit.duration);
+                            const newTime = Math.max(0, Math.min(totalDuration, Math.floor(percentage * totalDuration)));
+                            setVideoCurrentTime(newTime);
+                          }}
+                        >
+                          <div
+                            className="absolute h-full bg-red-500 rounded-full transition-all duration-150"
+                            style={{
+                              width: `${(videoCurrentTime / parseTime(selectedVideoForEdit.duration)) * 100}%`,
+                            }}
+                          />
+                          <div
+                            className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-red-500 rounded-full cursor-move border-2 border-white shadow-xl transition-all duration-150 group-hover:scale-125"
+                            style={{
+                              left: `calc(${(videoCurrentTime / parseTime(selectedVideoForEdit.duration)) * 100}% - 7px)`,
+                            }}
+                          />
+                        </div>
+                        
+                        {/* Time and Controls */}
+                        <div className="flex items-center gap-4 mt-3">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setIsVideoPlaying(!isVideoPlaying)}
+                            className="text-white hover:bg-white/20 h-8 w-8 rounded-full"
+                          >
+                            {isVideoPlaying ? (
+                              <Pause className="w-4 h-4" />
+                            ) : (
+                              <Play className="w-4 h-4 ml-0.5" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setIsVideoMuted(!isVideoMuted)}
+                            className="text-white hover:bg-white/20 h-8 w-8 rounded-full"
+                          >
+                            {isVideoMuted ? (
+                              <VolumeX className="w-4 h-4" />
+                            ) : (
+                              <Volume2 className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <span className="text-white/90 text-xs font-medium min-w-[85px] tabular-nums">
+                            {formatTime(videoCurrentTime)} / {selectedVideoForEdit.duration}
+                          </span>
+                          <div className="flex-1" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-white/80 hover:text-white hover:bg-white/20 h-8 w-8 rounded-full"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-white/80 hover:text-white hover:bg-white/20 h-8 w-8 rounded-full"
+                          >
+                            <Maximize className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Controls */}
+              <div className="p-5 bg-gray-900/95 border-t border-gray-700/50 flex-shrink-0">
+                {/* Timeline with Duration - Show on hover */}
+                <div className={`flex items-center gap-4 mb-4 transition-all duration-300 ${isHoveringVideo ? 'opacity-100' : 'opacity-0'}`}>
+                  <div 
+                    className="relative flex-1 h-4 bg-yellow-500/90 rounded-full overflow-visible cursor-pointer"
+                    data-timeline
+                    onClick={(e) => {
+                      if (!isDraggingStart && !isDraggingEnd && !isDraggingCurrent) {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const clickX = e.clientX - rect.left;
+                        const percentage = clickX / rect.width;
+                        const totalDuration = parseTime(selectedVideoForEdit.duration);
+                        const newTime = Math.max(0, Math.min(totalDuration, Math.floor(percentage * totalDuration)));
+                        setVideoCurrentTime(newTime);
+                      }
+                    }}
+                  >
+                    {/* Selected range (red segment) */}
+                    <div
+                      className="absolute h-full bg-red-500 rounded-full"
+                      style={{
+                        left: `${(parseTime(videoStartTime) / parseTime(selectedVideoForEdit.duration)) * 100}%`,
+                        width: `${((parseTime(videoEndTime) - parseTime(videoStartTime)) / parseTime(selectedVideoForEdit.duration)) * 100}%`,
+                      }}
+                    />
+                    {/* Start marker */}
+                    <div
+                      className="absolute top-0 cursor-move z-10"
+                      style={{
+                        left: `${(parseTime(videoStartTime) / parseTime(selectedVideoForEdit.duration)) * 100}%`,
+                        transform: 'translateX(-50%)',
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setIsDraggingStart(true);
+                      }}
+                    >
+                      <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[4px] border-transparent border-t-white mx-auto" />
+                      <div className="w-0.5 h-5 bg-white mx-auto" />
+                    </div>
+                    {/* End marker */}
+                    <div
+                      className="absolute top-0 cursor-move z-10"
+                      style={{
+                        left: `${(parseTime(videoEndTime) / parseTime(selectedVideoForEdit.duration)) * 100}%`,
+                        transform: 'translateX(-50%)',
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setIsDraggingEnd(true);
+                      }}
+                    >
+                      <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[4px] border-transparent border-b-white mx-auto" />
+                      <div className="w-0.5 h-5 bg-white mx-auto" />
+                    </div>
+                    {/* Current position indicator - red circle */}
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full cursor-move z-20 border-2 border-white"
+                      style={{
+                        left: `calc(${(videoCurrentTime / parseTime(selectedVideoForEdit.duration)) * 100}% - 6px)`,
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setIsDraggingCurrent(true);
+                      }}
+                    />
+                  </div>
+                  <span className="text-white/90 text-xs font-medium tabular-nums min-w-[45px]">
+                    {selectedVideoForEdit.duration}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsVideoMuted(!isVideoMuted)}
+                    className="text-white/80 hover:text-white hover:bg-white/10 h-8 w-8"
+                  >
+                    {isVideoMuted ? (
+                      <VolumeX className="w-4 h-4" />
+                    ) : (
+                      <Volume2 className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+
+                {/* Controls Row */}
+                <div className="flex items-center gap-4">
+                  {/* Time Inputs */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-white text-xs font-medium">START</Label>
+                    <Input
+                      type="text"
+                      value={videoStartTime}
+                      onChange={(e) => setVideoStartTime(e.target.value)}
+                      className="w-16 h-8 bg-gray-800 border border-gray-600 text-white text-center font-medium text-xs rounded"
+                      placeholder="00:00"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-white text-xs font-medium">END</Label>
+                    <Input
+                      type="text"
+                      value={videoEndTime}
+                      onChange={(e) => setVideoEndTime(e.target.value)}
+                      className="w-16 h-8 bg-gray-800 border border-gray-600 text-white text-center font-medium text-xs rounded"
+                      placeholder="00:00"
+                    />
+                  </div>
+                  
+                  <div className="flex-1" />
+                  
+                  {/* Playback Controls */}
+                  <div className="flex items-center gap-1">
+                    {/* Fast Rewind (4 bars) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoCurrentTime(0)}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Skip to start"
+                    >
+                      <div className="flex gap-0.5 items-center">
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                      </div>
+                    </Button>
+                    {/* Rewind Frame (2 bars) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoCurrentTime(Math.max(0, videoCurrentTime - 10))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Rewind"
+                    >
+                      <div className="flex gap-0.5 items-center">
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                      </div>
+                    </Button>
+                    {/* Step backward */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoCurrentTime(Math.max(0, videoCurrentTime - 1))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Step backward"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    {/* Mark in */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoStartTime(formatTime(videoCurrentTime))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Mark in point"
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </Button>
+                    {/* Play/Pause button - highlighted when playing */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsVideoPlaying(!isVideoPlaying)}
+                      className={`h-8 w-8 rounded ${isVideoPlaying ? 'bg-gray-500 text-white' : 'text-white hover:bg-gray-700'}`}
+                    >
+                      {isVideoPlaying ? (
+                        <Pause className="w-4 h-4" />
+                      ) : (
+                        <Play className="w-4 h-4 ml-0.5" />
+                      )}
+                    </Button>
+                    {/* Mark out */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoEndTime(formatTime(videoCurrentTime))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Mark out point"
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </Button>
+                    {/* Step forward */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoCurrentTime(Math.min(parseTime(selectedVideoForEdit.duration), videoCurrentTime + 1))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Step forward"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                    {/* Fast forward (2 bars) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoCurrentTime(Math.min(parseTime(selectedVideoForEdit.duration), videoCurrentTime + 10))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Fast forward"
+                    >
+                      <div className="flex gap-0.5 items-center">
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                      </div>
+                    </Button>
+                    {/* Fast forward to end (4 bars) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setVideoCurrentTime(parseTime(selectedVideoForEdit.duration))}
+                      className="text-white hover:bg-gray-700 h-8 w-8 rounded"
+                      title="Skip to end"
+                    >
+                      <div className="flex gap-0.5 items-center">
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                        <div className="w-0.5 h-3.5 bg-white rounded" />
+                      </div>
+                    </Button>
+                  </div>
+                  
+                  {/* Clip Duration, Slide Dropdown and Add Button */}
+                  <div className="flex items-center gap-3">
+                    <div className="text-white text-xs font-medium tabular-nums">
+                      CLIP DURATION {selectedVideoForEdit.duration}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-white text-xs font-medium">Scene:</Label>
+                      <Select value={selectedSceneForVideo} onValueChange={setSelectedSceneForVideo}>
+                        <SelectTrigger className="w-32 h-8 bg-gray-800 border border-gray-600 text-white text-xs rounded focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/50">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
-                          {[4, 5, 6, 7, 8, 9, 10].map((n) => (
-                            <SelectItem key={n} value={n.toString()}>
-                              {n} slides
+                        <SelectContent className="bg-gray-800/95 border border-gray-600/60 backdrop-blur-md">
+                          <SelectItem value="ai" className="text-white text-xs focus:bg-gray-700/80">
+                            AI Decides
+                          </SelectItem>
+                          {Array.from({ length: parseInt(formData.scenes) || 6 }, (_, i) => (
+                            <SelectItem 
+                              key={i + 1} 
+                              value={(i + 1).toString()}
+                              className="text-white text-xs focus:bg-gray-700/80"
+                            >
+                              Scene {i + 1}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div>
-                      <Label htmlFor="videoType">Video Type</Label>
-                      <Select value={videoType} onValueChange={setVideoType}>
-                        <SelectTrigger className="mt-1.5">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="news">News</SelectItem>
-                          <SelectItem value="explainer">Explainer</SelectItem>
-                          <SelectItem value="shorts">Shorts</SelectItem>
-                          <SelectItem value="social">Social</SelectItem>
-                          <SelectItem value="promo">Promo</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section C: Theme Selection */}
-              <div className="p-6 rounded-xl border border-border bg-card">
-                <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
-                    C
-                  </span>
-                  Theme Selection
-                  <span className="ml-2 text-xs text-muted-foreground font-normal">
-                    (AI Recommended)
-                  </span>
-                </h2>
-
-                {(format === "16:9" || format === "both") && (
-                  <div className="mb-6">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Monitor className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">16:9 Horizontal</span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3">
-                      {themes.map((theme, index) => (
-                        <ThemeCard
-                          key={theme.id}
-                          name={theme.name}
-                          preview={theme.preview}
-                          format="16:9"
-                          selected={selectedTheme16x9 === theme.id}
-                          onClick={() => setSelectedTheme16x9(theme.id)}
-                          delay={index * 0.05}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {(format === "9:16" || format === "both") && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <Smartphone className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">9:16 Vertical</span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-3">
-                      {verticalThemes.map((theme, index) => (
-                        <ThemeCard
-                          key={theme.id}
-                          name={theme.name}
-                          preview={theme.preview}
-                          format="9:16"
-                          selected={selectedTheme9x16 === theme.id}
-                          onClick={() => setSelectedTheme9x16(theme.id)}
-                          delay={index * 0.05}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Right column - Format & Media */}
-            <div className="space-y-6">
-              {/* Section B: Format Selection */}
-              <div className="p-6 rounded-xl border border-border bg-card">
-                <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
-                    B
-                  </span>
-                  Format
-                </h2>
-
-                <div className="space-y-3">
-                  {[
-                    { value: "16:9", label: "16:9 Horizontal", icon: Monitor, desc: "YouTube, Website" },
-                    { value: "9:16", label: "9:16 Vertical", icon: Smartphone, desc: "Reels, Shorts, Stories" },
-                    { value: "both", label: "Both Formats", icon: null, desc: "Generate both versions" },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => setFormat(option.value as FormatOption)}
-                      className={`w-full p-4 rounded-lg border transition-all duration-200 text-left ${
-                        format === option.value
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:border-primary/50"
-                      }`}
+                    <Button
+                      onClick={handleAddVideo}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 h-8 rounded font-medium text-xs"
                     >
-                      <div className="flex items-center gap-3">
-                        {option.icon ? (
-                          <option.icon className="w-5 h-5 text-muted-foreground" />
-                        ) : (
-                          <div className="flex -space-x-1">
-                            <Monitor className="w-4 h-4 text-muted-foreground" />
-                            <Smartphone className="w-4 h-4 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-foreground">{option.label}</p>
-                          <p className="text-xs text-muted-foreground">{option.desc}</p>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Section D: Media Inputs */}
-              <div className="p-6 rounded-xl border border-border bg-card">
-                <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
-                    D
-                  </span>
-                  Media
-                </h2>
-
-                <div className="space-y-4">
-                  <div>
-                    <Label className="mb-2 block">Video Bytes</Label>
-                    <Button variant="outline" className="w-full gap-2 h-auto py-3">
-                      <Upload className="w-4 h-4" />
-                      <span>Upload from Flike CMS</span>
+                      <Scissors className="w-3.5 h-3.5 mr-1.5" />
+                      ADD
                     </Button>
                   </div>
-
-                  <div>
-                    <Label className="mb-2 block">Background Music</Label>
-                    <div className="p-3 rounded-lg border border-border bg-secondary/30">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <Music className="w-5 h-5 text-primary" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">
-                            News Upbeat Modern
-                          </p>
-                          <p className="text-xs text-muted-foreground">AI Selected • 2:34</p>
-                        </div>
-                        <Button variant="ghost" size="sm">
-                          Change
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </motion.div>
-      </main>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
