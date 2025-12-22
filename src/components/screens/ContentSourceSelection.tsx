@@ -1,20 +1,19 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import {
   Newspaper,
   TrendingUp,
-  Type,
-  Layers,
+  PenTool,
   Image,
-  ArrowRight,
-  Sparkles,
+  Folder,
+  Moon,
+  Sun,
 } from "lucide-react";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { OptimusLogo } from "@/components/OptimusLogo";
 import { ContentSourceCard } from "@/components/ContentSourceCard";
-import { Button } from "@/components/ui/button";
+import { useTheme } from "@/components/ThemeProvider";
+import { Switch } from "@/components/ui/switch";
 
-type ContentSource = "article" | "trending" | "text" | "webstory" | "photos" | null;
+type ContentSource = "article" | "trending" | "text" | "visual" | null;
 
 interface ContentSourceSelectionProps {
   onSelect: (source: ContentSource) => void;
@@ -24,42 +23,35 @@ const contentSources = [
   {
     id: "article" as const,
     icon: Newspaper,
-    title: "Article → Video",
-    description: "Convert Times of India articles into engaging videos with AI-extracted key points",
+    title: "Article to Video",
+    description: "Convert articles into engaging video content",
     accentColor: "primary" as const,
   },
   {
     id: "trending" as const,
     icon: TrendingUp,
-    title: "Trending Topics → Video",
-    description: "Create videos from trending topics on Instagram, X, and Facebook",
+    title: "Trending Topics",
+    description: "Create videos from trending topics on Twitter/Google",
     accentColor: "accent" as const,
   },
   {
     id: "text" as const,
-    icon: Type,
-    title: "Text → Video",
-    description: "Transform any text into a slide-wise video with AI rewriting and tone options",
+    icon: PenTool,
+    title: "Text to Video",
+    description: "Convert text into videos with smart AI enhancements",
     accentColor: "primary" as const,
   },
   {
-    id: "webstory" as const,
-    icon: Layers,
-    title: "Web Stories → Video",
-    description: "Convert existing web stories into video format with smooth transitions",
-    accentColor: "success" as const,
-  },
-  {
-    id: "photos" as const,
+    id: "visual" as const,
     icon: Image,
-    title: "Photos / Gallery → Video",
-    description: "Create videos from photo galleries with AI-suggested captions and transitions",
-    accentColor: "warning" as const,
+    title: "Webstories & Photogallery",
+    description: "Transform webstories and photo galleries into videos",
+    accentColor: "success" as const,
   },
 ];
 
 export function ContentSourceSelection({ onSelect }: ContentSourceSelectionProps) {
-  const [hoveredSource, setHoveredSource] = useState<ContentSource>(null);
+  const { theme, setTheme } = useTheme();
 
   return (
     <div className="min-h-screen bg-background">
@@ -67,14 +59,27 @@ export function ContentSourceSelection({ onSelect }: ContentSourceSelectionProps
       <div className="fixed inset-0 bg-gradient-radial from-primary/5 via-transparent to-transparent pointer-events-none" />
       
       {/* Header */}
-      <header className="relative z-10 border-b border-border bg-card/50 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-border bg-card/50 backdrop-blur-xl">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <OptimusLogo />
+          <h1 className="font-display text-xl font-semibold">
+            Slike <span className="text-black dark:text-white font-bold">Optimus</span> Video Creation Platform
+          </h1>
           <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <span className="text-sm text-muted-foreground hidden sm:block">Times of India</span>
-            <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-              <span className="text-xs font-medium text-secondary-foreground">TI</span>
+            <Link
+              to="/projects"
+              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-secondary transition-colors"
+            >
+              <Folder className="w-4 h-4" />
+              <span className="text-sm font-medium">My Projects</span>
+            </Link>
+            <div className="flex items-center gap-2">
+              <Moon className="w-4 h-4 text-muted-foreground" />
+              <Switch
+                checked={theme === "dark"}
+                onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+                aria-label="Toggle theme"
+              />
+              <Sun className="w-4 h-4 text-muted-foreground" />
             </div>
           </div>
         </div>
@@ -88,21 +93,16 @@ export function ContentSourceSelection({ onSelect }: ContentSourceSelectionProps
           transition={{ duration: 0.5 }}
           className="text-center mb-12"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium text-primary">AI-Powered Video Creation</span>
-          </div>
-          
           <h1 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4">
-            How would you like to create your video?
+            Create Your Video
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Choose a content source and let AI transform it into a stunning video in minutes.
+            Choose a method to start creating engaging video content
           </p>
         </motion.div>
 
         {/* Content source cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto">
           {contentSources.map((source, index) => (
             <ContentSourceCard
               key={source.id}
@@ -115,18 +115,6 @@ export function ContentSourceSelection({ onSelect }: ContentSourceSelectionProps
             />
           ))}
         </div>
-
-        {/* Quick tips */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          className="mt-16 text-center"
-        >
-          <p className="text-sm text-muted-foreground">
-            <span className="text-primary">Pro tip:</span> Start with Article → Video for the fastest results
-          </p>
-        </motion.div>
       </main>
     </div>
   );

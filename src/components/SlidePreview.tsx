@@ -1,21 +1,23 @@
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-interface SlidePreviewProps {
-  slideNumber: number;
+interface ScenePreviewProps {
+  sceneNumber: number;
   thumbnail: string;
   duration: string;
   active?: boolean;
   onClick: () => void;
+  format?: "16:9" | "9:16";
 }
 
-export function SlidePreview({
-  slideNumber,
+export function ScenePreview({
+  sceneNumber,
   thumbnail,
   duration,
   active = false,
   onClick,
-}: SlidePreviewProps) {
+  format = "16:9",
+}: ScenePreviewProps) {
   return (
     <motion.button
       whileHover={{ scale: 1.02 }}
@@ -28,17 +30,20 @@ export function SlidePreview({
           : "border-border hover:border-primary/50"
       )}
     >
-      <div className="aspect-video relative">
+      <div className={cn(
+        "relative",
+        format === "9:16" ? "aspect-[9/16]" : "aspect-video"
+      )}>
         <img
           src={thumbnail}
-          alt={`Slide ${slideNumber}`}
+          alt={`Scene ${sceneNumber}`}
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
         
-        {/* Slide number */}
+        {/* Scene number */}
         <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-background/80 backdrop-blur-sm">
-          <span className="text-xs font-medium text-foreground">{slideNumber}</span>
+          <span className="text-xs font-medium text-foreground">{sceneNumber}</span>
         </div>
 
         {/* Duration */}

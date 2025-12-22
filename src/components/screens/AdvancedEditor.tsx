@@ -24,18 +24,22 @@ import {
   ChevronRight,
   Plus,
   Moon,
+  Sun,
   Trash2,
   Copy,
   Scissors,
   AlignLeft,
   AlignCenter,
   AlignRight,
+  Volume2,
 } from "lucide-react";
 import { OptimusLogo } from "@/components/OptimusLogo";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useTheme } from "@/components/ThemeProvider";
+import { Switch } from "@/components/ui/switch";
 
 interface AdvancedEditorProps {
   onBack: () => void;
@@ -49,18 +53,23 @@ const mockLayers = [
 ];
 
 const timelineItems = [
-  { id: 1, name: "Slide 1", duration: 5, color: "bg-primary" },
-  { id: 2, name: "Slide 2", duration: 5, color: "bg-accent" },
-  { id: 3, name: "Slide 3", duration: 5, color: "bg-success" },
-  { id: 4, name: "Slide 4", duration: 5, color: "bg-warning" },
-  { id: 5, name: "Slide 5", duration: 5, color: "bg-primary" },
-  { id: 6, name: "Slide 6", duration: 5, color: "bg-accent" },
+  { id: 1, name: "Scene 1", duration: 5, color: "bg-primary" },
+  { id: 2, name: "Scene 2", duration: 5, color: "bg-accent" },
+  { id: 3, name: "Scene 3", duration: 5, color: "bg-success" },
+  { id: 4, name: "Scene 4", duration: 5, color: "bg-warning" },
+  { id: 5, name: "Scene 5", duration: 5, color: "bg-primary" },
+  { id: 6, name: "Scene 6", duration: 5, color: "bg-accent" },
 ];
 
 export function AdvancedEditor({ onBack }: AdvancedEditorProps) {
+  const { theme, setTheme } = useTheme();
   const [isPlaying, setIsPlaying] = useState(false);
   const [zoom, setZoom] = useState([100]);
   const [selectedTool, setSelectedTool] = useState("select");
+  const [startTime, setStartTime] = useState("00:04");
+  const [endTime, setEndTime] = useState("00:40");
+  const [inPosition, setInPosition] = useState(10); // Percentage position of in point
+  const [outPosition, setOutPosition] = useState(100); // Percentage position of out point
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -79,7 +88,15 @@ export function AdvancedEditor({ onBack }: AdvancedEditorProps) {
 
           {/* Center tools */}
           <div className="flex items-center gap-1 px-3 py-1 rounded-lg bg-secondary/50">
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <Moon className="w-4 h-4 text-muted-foreground" />
+              <Switch
+                checked={theme === "dark"}
+                onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+                aria-label="Toggle theme"
+              />
+              <Sun className="w-4 h-4 text-muted-foreground" />
+            </div>
             <div className="w-px h-6 bg-border mx-1" />
             <Button variant="ghost" size="icon" className="w-8 h-8">
               <Undo className="w-4 h-4" />
@@ -110,7 +127,7 @@ export function AdvancedEditor({ onBack }: AdvancedEditorProps) {
             </Button>
             <Button size="sm">
               <Upload className="w-4 h-4 mr-2" />
-              Upload to Flike
+              Upload to Slike
             </Button>
           </div>
         </div>
@@ -302,6 +319,213 @@ export function AdvancedEditor({ onBack }: AdvancedEditorProps) {
                 <option>Scale</option>
                 <option>None</option>
               </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* In/Out Bar - Always Visible */}
+      <div className="border-t border-border bg-card">
+        <div className="px-4 py-3">
+          {/* In/Out Timeline Bar */}
+          <div className="relative h-12 rounded-lg overflow-hidden mb-3 cursor-pointer">
+            {/* Yellow section (before in point) */}
+            <div
+              className="absolute left-0 top-0 bottom-0 bg-yellow-500/80"
+              style={{ width: `${inPosition}%` }}
+            />
+            {/* Red section (between in and out points) */}
+            <div
+              className="absolute top-0 bottom-0 bg-red-500/80"
+              style={{ left: `${inPosition}%`, width: `${outPosition - inPosition}%` }}
+            />
+            {/* Gray section (after out point) */}
+            <div
+              className="absolute right-0 top-0 bottom-0 bg-gray-500/30"
+              style={{ width: `${100 - outPosition}%` }}
+            />
+            
+            {/* In point handle */}
+            <div
+              className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize z-10 flex items-center justify-center"
+              style={{ left: `${inPosition}%` }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startPos = inPosition;
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  const bar = (moveEvent.target as HTMLElement).closest('.relative') as HTMLElement;
+                  if (bar) {
+                    const rect = bar.getBoundingClientRect();
+                    const newPos = Math.max(0, Math.min(outPosition - 5, ((moveEvent.clientX - rect.left) / rect.width) * 100));
+                    setInPosition(newPos);
+                    // Update start time based on position
+                    const totalSeconds = 40;
+                    const seconds = Math.round((newPos / 100) * totalSeconds);
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    setStartTime(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
+                  }
+                };
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove);
+                  document.removeEventListener('mouseup', handleMouseUp);
+                };
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+              }}
+            >
+              <div className="absolute -top-1 w-3 h-3 rounded-full bg-white border-2 border-gray-800 shadow-lg" />
+            </div>
+            
+            {/* Out point handle */}
+            <div
+              className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize z-10 flex items-center justify-center"
+              style={{ left: `${outPosition}%` }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startPos = outPosition;
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  const bar = (moveEvent.target as HTMLElement).closest('.relative') as HTMLElement;
+                  if (bar) {
+                    const rect = bar.getBoundingClientRect();
+                    const newPos = Math.min(100, Math.max(inPosition + 5, ((moveEvent.clientX - rect.left) / rect.width) * 100));
+                    setOutPosition(newPos);
+                    // Update end time based on position
+                    const totalSeconds = 40;
+                    const seconds = Math.round((newPos / 100) * totalSeconds);
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    setEndTime(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
+                  }
+                };
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove);
+                  document.removeEventListener('mouseup', handleMouseUp);
+                };
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+              }}
+            >
+              <div className="absolute -top-1 w-3 h-3 rounded-full bg-white border-2 border-gray-800 shadow-lg" />
+            </div>
+            
+            {/* Time display on the right */}
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-foreground bg-background/80 px-2 py-1 rounded">
+              {endTime}
+            </div>
+          </div>
+
+          {/* Controls Row */}
+          <div className="flex items-center justify-between mt-3">
+            {/* Left: START and END inputs */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-muted-foreground">START</label>
+                <input
+                  type="text"
+                  value={startTime}
+                  onChange={(e) => {
+                    setStartTime(e.target.value);
+                    // Parse time and update position
+                    const [mins, secs] = e.target.value.split(':').map(Number);
+                    if (!isNaN(mins) && !isNaN(secs)) {
+                      const totalSeconds = 40;
+                      const seconds = mins * 60 + secs;
+                      const newPos = Math.max(0, Math.min(100, (seconds / totalSeconds) * 100));
+                      setInPosition(newPos);
+                    }
+                  }}
+                  className="w-20 px-2 py-1 text-sm rounded border border-border bg-secondary/50 text-foreground"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-muted-foreground">END</label>
+                <input
+                  type="text"
+                  value={endTime}
+                  onChange={(e) => {
+                    setEndTime(e.target.value);
+                    // Parse time and update position
+                    const [mins, secs] = e.target.value.split(':').map(Number);
+                    if (!isNaN(mins) && !isNaN(secs)) {
+                      const totalSeconds = 40;
+                      const seconds = mins * 60 + secs;
+                      const newPos = Math.max(0, Math.min(100, (seconds / totalSeconds) * 100));
+                      setOutPosition(newPos);
+                    }
+                  }}
+                  className="w-20 px-2 py-1 text-sm rounded border border-border bg-secondary/50 text-foreground"
+                />
+              </div>
+            </div>
+
+            {/* Center: Playback Controls */}
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" className="w-8 h-8">
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="w-8 h-8">
+                <span className="text-xs">↓</span>
+              </Button>
+              <Button
+                size="icon"
+                className="w-10 h-10 rounded-full"
+                onClick={() => setIsPlaying(!isPlaying)}
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              </Button>
+              <Button variant="ghost" size="icon" className="w-8 h-8">
+                <span className="text-xs">↑</span>
+              </Button>
+              <Button variant="ghost" size="icon" className="w-8 h-8">
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="w-8 h-8">
+                <span className="text-xs">|||</span>
+              </Button>
+            </div>
+
+            {/* Right: Clip Duration and Scene Selector */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">CLIP DURATION</span>
+                <span className="text-xs font-medium text-foreground">
+                  {(() => {
+                    const [startMins, startSecs] = startTime.split(':').map(Number);
+                    const [endMins, endSecs] = endTime.split(':').map(Number);
+                    const startTotal = (startMins || 0) * 60 + (startSecs || 0);
+                    const endTotal = (endMins || 0) * 60 + (endSecs || 0);
+                    const duration = endTotal - startTotal;
+                    const mins = Math.floor(duration / 60);
+                    const secs = duration % 60;
+                    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                  })()}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-muted-foreground">Scene:</label>
+                <Select defaultValue="Al Decides">
+                  <SelectTrigger className="w-[140px] h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Al Decides">Al Decides</SelectItem>
+                    <SelectItem value="Scene 1">Scene 1</SelectItem>
+                    <SelectItem value="Scene 2">Scene 2</SelectItem>
+                    <SelectItem value="Scene 3">Scene 3</SelectItem>
+                    <SelectItem value="Scene 4">Scene 4</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button variant="ghost" size="icon" className="w-8 h-8">
+                <Volume2 className="w-4 h-4 text-muted-foreground" />
+              </Button>
+              <Button size="sm" className="gap-2">
+                <Scissors className="w-4 h-4" />
+                ADD
+              </Button>
             </div>
           </div>
         </div>
