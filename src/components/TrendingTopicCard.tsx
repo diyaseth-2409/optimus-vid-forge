@@ -1,82 +1,89 @@
 import { motion } from "framer-motion";
-import { TrendingUp, Instagram, Twitter, Facebook } from "lucide-react";
+import { TrendingUp, Twitter, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TrendingTopicCardProps {
   topic: string;
-  source: "instagram" | "twitter" | "facebook";
-  rank: number;
-  engagement: string;
+  description: string;
+  source: "twitter" | "google";
+  hashtag?: string | null;
+  engagement?: string | null;
+  searches?: string | null;
   selected?: boolean;
   onClick: () => void;
   delay?: number;
 }
 
-const sourceIcons = {
-  instagram: Instagram,
-  twitter: Twitter,
-  facebook: Facebook,
-};
-
-const sourceColors = {
-  instagram: "from-pink-500 to-purple-600",
-  twitter: "from-blue-400 to-blue-600",
-  facebook: "from-blue-600 to-blue-800",
-};
-
 export function TrendingTopicCard({
   topic,
+  description,
   source,
-  rank,
+  hashtag,
   engagement,
+  searches,
   selected = false,
   onClick,
   delay = 0,
 }: TrendingTopicCardProps) {
-  const SourceIcon = sourceIcons[source];
+  const SourceIcon = source === "twitter" ? Twitter : Globe;
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay }}
-      whileHover={{ x: 4 }}
-      whileTap={{ scale: 0.98 }}
+      whileHover={{ y: -4 }}
+      className="h-full"
     >
       <button
         onClick={onClick}
         className={cn(
-          "group relative w-full p-4 rounded-xl border text-left",
+          "group relative w-full h-full p-5 rounded-lg border text-left flex flex-col",
           "transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/50",
+          "bg-card hover:shadow-lg",
           selected
-            ? "border-primary bg-primary/5 shadow-lg shadow-primary/10"
-            : "border-border bg-card hover:border-primary/50"
+            ? "border-primary bg-primary/5 shadow-md"
+            : "border-border hover:border-primary/50"
         )}
       >
-        <div className="flex items-center gap-4">
-          {/* Rank */}
-          <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
-            <span className="font-display font-bold text-lg text-muted-foreground">#{rank}</span>
+        {/* Top Section: Source Badge and Growth Indicator */}
+        <div className="flex items-start justify-between mb-3">
+          {/* Source Badge */}
+          <div className="flex items-center gap-1.5 bg-black text-white px-2.5 py-1 rounded-full text-xs font-medium">
+            <SourceIcon className="w-3 h-3" />
+            <span className="capitalize">{source}</span>
           </div>
 
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <h3 className="font-medium text-foreground line-clamp-1 group-hover:text-primary transition-colors">
-              {topic}
-            </h3>
-            <div className="flex items-center gap-2 mt-1">
-              <TrendingUp className="w-3.5 h-3.5 text-success" />
-              <span className="text-xs text-muted-foreground">{engagement}</span>
-            </div>
+          {/* Growth Indicator */}
+          <div className="flex items-center justify-center">
+            <TrendingUp className="w-5 h-5 text-green-500" />
           </div>
+        </div>
 
-          {/* Source badge */}
-          <div className={cn(
-            "flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br",
-            sourceColors[source]
-          )}>
-            <SourceIcon className="w-4 h-4 text-white" />
+        {/* Title */}
+        <h3 className="font-bold text-lg text-foreground mb-2 line-clamp-2 group-hover:text-primary transition-colors">
+          {topic}
+        </h3>
+
+        {/* Description */}
+        <p className="text-sm text-muted-foreground mb-3 line-clamp-2 flex-shrink-0">
+          {description}
+        </p>
+
+        {/* Hashtag (if available) */}
+        {hashtag && (
+          <div className="mb-3 flex-shrink-0">
+            <span className="inline-block bg-muted text-foreground px-2.5 py-1 rounded-full text-xs font-medium">
+              {hashtag}
+            </span>
           </div>
+        )}
+
+        {/* Bottom Section: Engagement/Search Count */}
+        <div className="flex items-center justify-end mt-auto pt-2">
+          <span className="text-xs text-muted-foreground">
+            {engagement || searches}
+          </span>
         </div>
 
         {/* Selection indicator */}

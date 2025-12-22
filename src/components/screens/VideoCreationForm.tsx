@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -25,6 +25,7 @@ import {
   SkipBack,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Volume2,
   VolumeX,
   ArrowDown,
@@ -36,6 +37,8 @@ import {
   RotateCcw,
   GripVertical,
   Palette,
+  MoreVertical,
+  Trash2,
 } from "lucide-react";
 import {
   DndContext,
@@ -87,6 +90,13 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { Slider } from "@/components/ui/slider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface VideoCreationFormProps {
   onBack: () => void;
@@ -99,7 +109,7 @@ type FormatOption = "16:9" | "9:16" | "both";
 const steps = [
   { id: 1, label: "METADATA", key: "metadata" },
   { id: 2, label: "TEMPLATE", key: "template" },
-  { id: 3, label: "BG AUDIO", key: "bgAudio" },
+  { id: 3, label: "Configuration", key: "configuration" },
   { id: 4, label: "Preview and Quick Edits", key: "horizontalPreview" },
   { id: 5, label: "Final Output", key: "finalOutput" },
 ];
@@ -212,17 +222,79 @@ interface SortableSceneItemProps {
   sceneRef?: (node: HTMLElement | null) => void;
 }
 
-function SortableSceneItem({
+type MediaItem = {
+  id: string;
+  url: string;
+  type: 'image' | 'video';
+  thumbnail?: string;
+};
+
+type SceneType = {
+  id: number;
+  caption: string;
+  voiceover: string;
+  mediaUrl?: string; // Deprecated: use mediaItems instead, kept for backward compatibility
+  mediaType?: 'image' | 'video'; // Deprecated: use mediaItems instead
+  mediaItems?: MediaItem[]; // Array of media items (images/videos)
+  activeMediaIndex?: number; // Index of currently active media item
+  thumbnail?: string;
+  sameAsCaption?: boolean;
+  voiceoverMode?: 'noCaption' | 'custom' | 'sameAsCaption';
+  captionColor?: string;
+  captionFontSize?: number;
+  captionFontFamily?: string;
+  captionX?: number;
+  captionY?: number;
+  captionWidth?: number;
+  captionHeight?: number;
+  captionBackgroundColor?: string;
+  captionStyle?: string;
+  duration?: string;
+};
+
+interface UnifiedSceneCardProps {
+  scene: SceneType;
+  index: number;
+  activeSceneIndex: number;
+  selectedCaptionIndex: number | null;
+  setActiveSceneIndex: (index: number) => void;
+  setSelectedCaptionIndex: (index: number | null) => void;
+  scenesData: SceneType[];
+  setScenesData: React.Dispatch<React.SetStateAction<SceneType[]>>;
+  format: "16:9" | "9:16";
+  isDraggingCaption: boolean;
+  setIsDraggingCaption: (value: boolean) => void;
+  isResizingCaption: boolean;
+  setIsResizingCaption: (value: boolean) => void;
+  setDragStart: (value: { x: number; y: number }) => void;
+  setResizeHandle: (value: string) => void;
+  setResizeStart: (value: { x: number; y: number; width: number; height: number | undefined }) => void;
+  setReplaceVideoSceneIndex: (index: number | null) => void;
+  setIsReplaceVideoDialogOpen: (value: boolean) => void;
+  captionStyles: Array<{ id: string; name: string; backgroundColor: string; textColor: string; fontFamily: string; description: string }>;
+}
+
+function UnifiedSceneCard({
   scene,
   index,
   activeSceneIndex,
   selectedCaptionIndex,
   setActiveSceneIndex,
   setSelectedCaptionIndex,
+  scenesData,
+  setScenesData,
   format,
-  renderPreview,
-  sceneRef,
-}: SortableSceneItemProps) {
+  isDraggingCaption,
+  setIsDraggingCaption,
+  isResizingCaption,
+  setIsResizingCaption,
+  setDragStart,
+  setResizeHandle,
+  setResizeStart,
+  setReplaceVideoSceneIndex,
+  setIsReplaceVideoDialogOpen,
+  captionStyles,
+}: UnifiedSceneCardProps) {
   const {
     attributes,
     listeners,
@@ -238,18 +310,375 @@ function SortableSceneItem({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // Combine refs for sortable and intersection observer
-  const combinedRef = (node: HTMLElement | null) => {
-    setNodeRef(node);
-    if (sceneRef) {
-      sceneRef(node);
+  const voiceoverMode = scene.voiceoverMode || (scene.sameAsCaption ? 'sameAsCaption' : 'custom');
+
+  const renderPreview = (previewFormat: "16:9" | "9:16", label: string) => (
+    <div
+      key={`${scene.id}-${previewFormat}`}
+      data-scene-preview={index}
+      className={cn(
+        "relative rounded-lg border overflow-hidden",
+        previewFormat === "9:16" ? "aspect-[9/16]" : "aspect-video"
+      )}
+    >
+      {scene.mediaUrl && scene.mediaType === 'video' ? (
+        <video
+          src={scene.mediaUrl}
+          className="w-full h-full object-cover object-center"
+          style={{ objectFit: 'cover', objectPosition: 'center' }}
+          muted
+          playsInline
+        />
+      ) : (
+        <img
+          src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
+          alt={`Scene ${scene.id} - ${label}`}
+          className="w-full h-full object-cover object-center"
+          style={{ objectFit: 'cover', objectPosition: 'center' }}
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
+
+      {/* Caption overlay - Draggable and Resizable */}
+      {scene.caption && (() => {
+        const isCaptionSelected = selectedCaptionIndex === index;
+        const x = scene.captionX || 0;
+        const y = scene.captionY || 85;
+        const width = scene.captionWidth || 100;
+        const height = scene.captionHeight || undefined;
+        
+        const handleCaptionClick = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (isCaptionSelected) {
+            setSelectedCaptionIndex(null);
+          } else {
+            setSelectedCaptionIndex(index);
+          }
+        };
+        
+        const handleMouseDown = (e: React.MouseEvent) => {
+          if (isCaptionSelected && !isResizingCaption) {
+            const container = e.currentTarget.closest('[data-scene-preview]');
+            if (container) {
+              const rect = container.getBoundingClientRect();
+              const offsetX = ((e.clientX - rect.left) / rect.width) * 100 - x;
+              const offsetY = ((e.clientY - rect.top) / rect.height) * 100 - y;
+              setDragStart({ x: offsetX, y: offsetY });
+              setIsDraggingCaption(true);
+            }
+          }
+        };
+        
+        const handleResizeStart = (e: React.MouseEvent, handle: string) => {
+          e.stopPropagation();
+          if (isCaptionSelected) {
+            setResizeHandle(handle);
+            setIsResizingCaption(true);
+            const container = e.currentTarget.closest('[data-scene-preview]');
+            if (container) {
+              const rect = container.getBoundingClientRect();
+              setResizeStart({
+                x: e.clientX,
+                y: e.clientY,
+                width: width,
+                height: height,
+              });
+            }
     }
   };
+        
+        const captionStyle: React.CSSProperties = {
+          left: `${x}%`,
+          top: `${y}%`,
+          width: `${width}%`,
+        };
+        if (height !== undefined) {
+          captionStyle.height = `${height}%`;
+        }
 
   return (
     <div
-      ref={combinedRef}
+            className={cn(
+              "absolute z-20",
+              isCaptionSelected && "cursor-move"
+            )}
+            style={captionStyle}
+            onClick={handleCaptionClick}
+            onMouseDown={handleMouseDown}
+          >
+            {isCaptionSelected && (
+              <div className="absolute inset-0 border-2 border-primary rounded pointer-events-none" />
+            )}
+            {(() => {
+              const selectedStyle = scene.captionStyle && scene.captionStyle !== "default" 
+                ? captionStyles.find(s => s.id === scene.captionStyle)
+                : null;
+              const bgColor = selectedStyle 
+                ? selectedStyle.backgroundColor 
+                : (scene.captionBackgroundColor || "rgba(0, 0, 0, 0.7)");
+              const textColor = selectedStyle 
+                ? selectedStyle.textColor 
+                : (scene.captionColor || "#FFFFFF");
+              const fontFamily = selectedStyle 
+                ? selectedStyle.fontFamily 
+                : (scene.captionFontFamily || "Inter");
+              
+              return (
+                <div
+                  className={cn(
+                    "p-2 rounded cursor-pointer",
+                    height === undefined ? "min-h-fit" : "h-full",
+                    isCaptionSelected && bgColor === "transparent" && "border border-primary/30"
+                  )}
+                  style={{
+                    backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
+                  }}
+                >
+                  <p
+                    className="font-semibold break-words"
+                    style={{
+                      color: textColor,
+                      fontSize: `${scene.captionFontSize || 16}px`,
+                      fontFamily: fontFamily,
+                    }}
+                  >
+                    {scene.caption}
+                  </p>
+                </div>
+              );
+            })()}
+            {isCaptionSelected && (
+              <>
+                <div className="absolute -top-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-left')} />
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-right')} />
+                <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-left')} />
+                <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-right')} />
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top')} />
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom')} />
+                <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'left')} />
+                <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'right')} />
+              </>
+            )}
+          </div>
+        );
+      })()}
+      
+      <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
+        <Button
+          variant="secondary"
+          size="sm"
+          className="gap-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            setReplaceVideoSceneIndex(index);
+            setIsReplaceVideoDialogOpen(true);
+          }}
+        >
+          <Upload className="w-4 h-4" />
+          Replace Media
+        </Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div 
+      ref={setNodeRef}
       style={style}
+      className={cn(
+        "rounded-lg border p-4 space-y-4 relative",
+        activeSceneIndex === index
+          ? "border-primary ring-2 ring-primary/30 shadow-md bg-primary/5" 
+          : "border-border"
+      )}
+      onClick={() => {
+          setActiveSceneIndex(index);
+          setSelectedCaptionIndex(null);
+      }}
+    >
+      {/* Drag Handle */}
+      <div
+        {...attributes}
+        {...listeners}
+        className="absolute top-2 right-2 z-20 p-1.5 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background cursor-grab active:cursor-grabbing"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+      </div>
+      
+      {/* Preview Section */}
+      <div className="w-full">
+        {renderPreview(format, format === "9:16" ? "Vertical" : "Horizontal")}
+      </div>
+      
+      {/* Details Section */}
+      <div className="flex flex-col space-y-3">
+        {/* Caption Section */}
+        <div>
+          <Label className="text-xs font-semibold mb-1 block">Caption</Label>
+          <Textarea
+            value={scene.caption}
+            onChange={(e) => {
+              const updated = [...scenesData];
+              updated[index].caption = e.target.value;
+              const mode = updated[index].voiceoverMode || (updated[index].sameAsCaption ? 'sameAsCaption' : 'custom');
+              if (mode === 'sameAsCaption') {
+                updated[index].voiceover = e.target.value;
+              }
+              setScenesData(updated);
+            }}
+            className="min-h-[32px] text-sm"
+            placeholder="Enter caption text..."
+          />
+        </div>
+
+        {/* Voiceover Section */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Label className="text-xs font-semibold shrink-0">Voiceover</Label>
+            <div className="flex-1 flex justify-end">
+              <Select
+                value={voiceoverMode}
+                onValueChange={(value: 'noCaption' | 'custom' | 'sameAsCaption') => {
+                  const updated = [...scenesData];
+                  updated[index].voiceoverMode = value;
+                  updated[index].sameAsCaption = value === 'sameAsCaption';
+                  if (value === 'sameAsCaption') {
+                    updated[index].voiceover = updated[index].caption;
+                  } else if (value === 'noCaption') {
+                    updated[index].voiceover = '';
+                  }
+                  setScenesData(updated);
+                }}
+              >
+                <SelectTrigger className="w-[140px] h-6 text-xs shrink-0 py-0 px-2 rounded-none">
+                  <SelectValue placeholder="Select voiceover option" />
+                </SelectTrigger>
+                <SelectContent className="rounded-none">
+                  <SelectItem value="noCaption" className="text-xs rounded-none">No Voiceover</SelectItem>
+                  <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
+                  <SelectItem value="sameAsCaption" className="text-xs rounded-none">Same as Caption</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {(voiceoverMode === 'custom' || voiceoverMode === 'sameAsCaption') && (
+            <Textarea
+              value={scene.voiceover || ""}
+              onChange={(e) => {
+                const updated = [...scenesData];
+                const mode = updated[index].voiceoverMode || (updated[index].sameAsCaption ? 'sameAsCaption' : 'custom');
+                if (mode === 'custom') {
+                  updated[index].voiceover = e.target.value;
+                  setScenesData(updated);
+                }
+              }}
+              className="min-h-[36px] text-xs w-full"
+              placeholder={voiceoverMode === 'sameAsCaption' ? "Same as caption (synced automatically)" : "Enter voiceover text..."}
+              disabled={voiceoverMode === 'sameAsCaption'}
+            />
+          )}
+        </div>
+
+        {/* Scene Duration Selection */}
+        <div className="pt-2 border-t border-border/50">
+          <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">SCENE DURATION</Label>
+          <div className="flex items-center gap-1 border border-border rounded-md px-2 h-9 bg-background">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 hover:bg-secondary"
+              onClick={() => {
+                const currentDuration = scene.duration || "5s";
+                const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
+                const newValue = Math.max(1, numericValue - 1);
+                const updated = [...scenesData];
+                updated[index].duration = `${newValue}s`;
+                setScenesData(updated);
+              }}
+            >
+              <Minus className="w-3 h-3" />
+            </Button>
+            <Input
+              type="text"
+              value={scene.duration || "5s"}
+              onChange={(e) => {
+                const updated = [...scenesData];
+                updated[index].duration = e.target.value;
+                setScenesData(updated);
+              }}
+              className="flex-1 h-6 text-center border-0 p-0 bg-transparent focus-visible:ring-0"
+              placeholder="5s"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 hover:bg-secondary"
+              onClick={() => {
+                const currentDuration = scene.duration || "5s";
+                const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
+                const newValue = numericValue + 1;
+                const updated = [...scenesData];
+                updated[index].duration = `${newValue}s`;
+                setScenesData(updated);
+              }}
+            >
+              <Plus className="w-3 h-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Component to get sortable attributes for a scene row
+function SortableSceneRow({
+  sceneId,
+  children,
+}: {
+  sceneId: number;
+  children: (props: {
+    attributes: any;
+    listeners: any;
+    setNodeRef: (node: HTMLElement | null) => void;
+    style: React.CSSProperties;
+  }) => React.ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: sceneId });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return <>{children({ attributes, listeners, setNodeRef, style })}</>;
+}
+
+function SortableSceneItem({
+  scene,
+  index,
+  activeSceneIndex,
+  selectedCaptionIndex,
+  setActiveSceneIndex,
+  setSelectedCaptionIndex,
+  format,
+  renderPreview,
+  sceneRef,
+}: SortableSceneItemProps) {
+  // This component is now just for the thumbnail preview, not sortable
+  return (
+    <div
       data-scene-index={index}
       className={cn(
         "relative rounded-lg border-2 overflow-hidden transition-all cursor-pointer",
@@ -258,30 +687,131 @@ function SortableSceneItem({
           : "border-border hover:border-primary/50"
       )}
       onClick={(e) => {
-        // Only set active scene if not clicking on caption or drag handle
-        if (!(e.target as HTMLElement).closest('[data-caption-overlay]') &&
-            !(e.target as HTMLElement).closest('[data-drag-handle]')) {
+        // Only set active scene if not clicking on caption
+        if (!(e.target as HTMLElement).closest('[data-caption-overlay]')) {
           setActiveSceneIndex(index);
           setSelectedCaptionIndex(null);
         }
       }}
     >
-      {/* Drag Handle */}
-      <div
-        {...attributes}
-        {...listeners}
-        data-drag-handle
-        className="absolute top-2 right-2 z-20 p-1.5 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background cursor-grab active:cursor-grabbing"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
-      </div>
-      
       <div className={format === "9:16" ? "max-w-[200px] mx-auto" : ""}>
         <div className="p-2">
           {renderPreview(format, format)}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface SortableMediaItemProps {
+  mediaItem: MediaItem;
+  index: number;
+  isActive: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  canDelete?: boolean; // Allow deletion if there's more than one item
+  onReplace?: () => void; // Optional replace functionality
+}
+
+function SortableMediaItem({
+  mediaItem,
+  index,
+  isActive,
+  onSelect,
+  onDelete,
+  canDelete = true,
+  onReplace,
+}: SortableMediaItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: mediaItem.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cn(
+        "relative rounded border overflow-hidden cursor-move transition-all group",
+        isActive
+          ? "ring-2 ring-primary border-primary"
+          : "border-border hover:border-primary/50"
+      )}
+      onClick={onSelect}
+    >
+      <div className="aspect-video w-full">
+        {mediaItem.type === 'video' ? (
+          <video
+            src={mediaItem.url}
+            className="w-full h-full object-cover"
+            muted
+            playsInline
+          />
+        ) : (
+          <img
+            src={mediaItem.thumbnail || mediaItem.url}
+            alt={`Media ${index + 1}`}
+            className="w-full h-full object-cover"
+          />
+        )}
+      </div>
+      {/* 3-dots menu for media options - always visible */}
+      <div className="absolute top-1 right-1 z-10">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="p-0.5 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <MoreVertical className="w-3 h-3 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            {onReplace && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReplace();
+                }}
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Replace
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                if (canDelete) {
+                  onDelete();
+                }
+              }}
+              disabled={!canDelete}
+              className="text-red-600 focus:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {mediaItem.type === 'video' && (
+        <div className="absolute bottom-1 left-1 p-0.5 rounded bg-black/60 backdrop-blur-sm">
+          <Video className="w-2.5 h-2.5 text-white" />
+        </div>
+      )}
     </div>
   );
 }
@@ -308,7 +838,7 @@ export function VideoCreationForm({
   const [musicSearchQuery, setMusicSearchQuery] = useState("");
   const [musicFilter, setMusicFilter] = useState<"all" | "my-uploads" | "previously-used" | "ai-recommended">("all");
   const [uploadedMusic, setUploadedMusic] = useState<Array<{ id: string; name: string; duration: string; source: string; category?: string }>>([]);
-  const [scenesData, setScenesData] = useState<Array<{ id: number; caption: string; voiceover: string; mediaUrl?: string; mediaType?: 'image' | 'video'; thumbnail?: string; sameAsCaption?: boolean; voiceoverMode?: 'noCaption' | 'custom' | 'sameAsCaption'; captionColor?: string; captionFontSize?: number; captionFontFamily?: string; captionX?: number; captionY?: number; captionWidth?: number; captionHeight?: number; captionBackgroundColor?: string; captionStyle?: string; duration?: string }>>([]);
+  const [scenesData, setScenesData] = useState<SceneType[]>([]);
   const [activeSceneIndex, setActiveSceneIndex] = useState(0);
   const [originalValues, setOriginalValues] = useState<{ caption: string; voiceover: string; sameAsCaption: boolean; voiceoverMode?: 'noCaption' | 'custom' | 'sameAsCaption'; captionColor?: string; captionFontSize?: number; captionFontFamily?: string; captionX?: number; captionY?: number; captionWidth?: number; captionHeight?: number; captionBackgroundColor?: string; captionStyle?: string } | null>(null);
   const [isDraggingCaption, setIsDraggingCaption] = useState(false);
@@ -353,17 +883,44 @@ export function VideoCreationForm({
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
   const [isReplaceVideoDialogOpen, setIsReplaceVideoDialogOpen] = useState(false);
   const [replaceVideoSceneIndex, setReplaceVideoSceneIndex] = useState<number | null>(null);
+  const [isAddingMedia, setIsAddingMedia] = useState(false);
+  const [addMediaSceneIndex, setAddMediaSceneIndex] = useState<number | null>(null);
   const [replaceVideoTab, setReplaceVideoTab] = useState<"upload" | "slike">("upload");
   const [replaceVideoSearchQuery, setReplaceVideoSearchQuery] = useState("");
-  const [selectedVideoForTrim, setSelectedVideoForTrim] = useState<{ id: string; title: string; thumbnail: string; duration: string } | null>(null);
+  const [selectedVideoForTrim, setSelectedVideoForTrim] = useState<{ id: string; title: string; thumbnail: string; duration: string; file?: File; url?: string } | null>(null);
   const [isVideoTrimDialogOpen, setIsVideoTrimDialogOpen] = useState(false);
   const [videoTrimStartTime, setVideoTrimStartTime] = useState("00:00");
   const [videoTrimEndTime, setVideoTrimEndTime] = useState("00:00");
   const [videoTrimCurrentTime, setVideoTrimCurrentTime] = useState(0);
   const [isVideoTrimPlaying, setIsVideoTrimPlaying] = useState(false);
   const [isVideoTrimMuted, setIsVideoTrimMuted] = useState(true);
+  const [videoTrimVolume, setVideoTrimVolume] = useState(100);
   const [isHoveringVideoTrim, setIsHoveringVideoTrim] = useState(false);
+  const [isDraggingVideoTrimStart, setIsDraggingVideoTrimStart] = useState(false);
+  const [isDraggingVideoTrimEnd, setIsDraggingVideoTrimEnd] = useState(false);
   const videoTrimRef = useRef<HTMLVideoElement | null>(null);
+  
+  // Logo configuration state
+  const [uploadedLogo, setUploadedLogo] = useState<string | null>(null);
+  const [logoPlacement, setLogoPlacement] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right" | null>(null);
+  const [logoToggle, setLogoToggle] = useState<"no-logo" | "upload-logo">("no-logo");
+  const [isLogoUploadDialogOpen, setIsLogoUploadDialogOpen] = useState(false);
+  
+  // Pre and Post Slates state
+  const [preSlate, setPreSlate] = useState<string | null>(null);
+  const [postSlate, setPostSlate] = useState<string | null>(null);
+  const [preSlateSearchQuery, setPreSlateSearchQuery] = useState("");
+  const [postSlateSearchQuery, setPostSlateSearchQuery] = useState("");
+  
+  // Mock slate options
+  const slateOptions = [
+    { id: "slate1", name: "Intro Slate 1", type: "pre" },
+    { id: "slate2", name: "Intro Slate 2", type: "pre" },
+    { id: "slate3", name: "Outro Slate 1", type: "post" },
+    { id: "slate4", name: "Outro Slate 2", type: "post" },
+    { id: "slate5", name: "Brand Intro", type: "pre" },
+    { id: "slate6", name: "Brand Outro", type: "post" },
+  ];
   
   // Refs for scene sync (used in preview steps)
   const sceneRefsMap = useRef<Map<number, HTMLElement>>(new Map());
@@ -374,6 +931,13 @@ export function VideoCreationForm({
   const verticalScrollContainerRef = useRef<HTMLDivElement>(null);
   const isVerticalUserScrolling = useRef(false);
   const verticalScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Refs for synchronized scrolling between left and right panels
+  const leftPanelScrollRef = useRef<HTMLDivElement>(null);
+  const rightPanelScrollRef = useRef<HTMLDivElement>(null);
+  const verticalLeftPanelScrollRef = useRef<HTMLDivElement>(null);
+  const sceneDetailsRefsMap = useRef<Map<number, HTMLElement>>(new Map());
+  const sceneThumbnailHeights = useRef<Map<number, number>>(new Map());
   
   // Drag and drop sensors
   const sensors = useSensors(
@@ -396,6 +960,46 @@ export function VideoCreationForm({
     const { active, over } = event;
     
     if (over && active.id !== over.id) {
+      // Check if this is a media item drag (string ID) or scene drag (number ID)
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      
+      // Check if both IDs are media item IDs (they should be UUIDs or similar strings)
+      const isMediaItemDrag = activeId.startsWith('media-') || overId.startsWith('media-');
+      
+      if (isMediaItemDrag) {
+        // Handle media item reordering within a scene
+        const sceneIndex = scenesData.findIndex(scene => 
+          scene.mediaItems?.some(item => item.id === activeId || item.id === overId)
+        );
+        
+        if (sceneIndex !== -1 && scenesData[sceneIndex].mediaItems) {
+          setScenesData((items) => {
+            const updated = [...items];
+            const scene = updated[sceneIndex];
+            if (scene.mediaItems) {
+              const oldIndex = scene.mediaItems.findIndex(item => item.id === activeId);
+              const newIndex = scene.mediaItems.findIndex(item => item.id === overId);
+              
+              if (oldIndex !== -1 && newIndex !== -1) {
+                const newMediaItems = arrayMove(scene.mediaItems, oldIndex, newIndex);
+                updated[sceneIndex] = {
+                  ...scene,
+                  mediaItems: newMediaItems,
+                  // Update activeMediaIndex if needed
+                  activeMediaIndex: scene.activeMediaIndex === oldIndex 
+                    ? newIndex 
+                    : scene.activeMediaIndex === newIndex 
+                    ? oldIndex 
+                    : scene.activeMediaIndex,
+                };
+              }
+            }
+            return updated;
+          });
+        }
+      } else {
+        // Handle scene reordering
       setScenesData((items) => {
         const oldIndex = items.findIndex((item) => item.id === Number(active.id));
         const newIndex = items.findIndex((item) => item.id === Number(over.id));
@@ -419,6 +1023,7 @@ export function VideoCreationForm({
         setActiveSceneIndex(activeSceneIndex - 1);
       } else if (activeSceneIndex < oldIndex && activeSceneIndex >= newIndex) {
         setActiveSceneIndex(activeSceneIndex + 1);
+        }
       }
     }
   };
@@ -563,6 +1168,10 @@ export function VideoCreationForm({
     selectedTheme16x9: "",
     selectedTheme9x16: "",
     backgroundMusic: "",
+    backgroundMusicVolumeType: "default" as "default" | "adaptive" | "custom",
+    backgroundMusicVolume: 50,
+    voiceoverVolumeType: "default" as "default" | "adaptive" | "custom",
+    voiceoverVolume: 50,
   });
 
   // Initialize scenes data based on number of scenes
@@ -970,6 +1579,246 @@ export function VideoCreationForm({
     };
   }, [currentStep, scenesData.length, activeSceneIndex, horizontalPreviewTab]);
 
+  // Scroll synchronization using refs to prevent infinite loops
+  const isSyncingFromLeftRef = useRef(false);
+  const isSyncingFromRightRef = useRef(false);
+
+  // Scroll handler functions for inline use
+  const handleLeftPanelScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (currentStep !== 3) return;
+    
+    const container = e.currentTarget;
+    
+    // Detect which scene is most visible and highlight it
+    const containerRect = container.getBoundingClientRect();
+    const containerCenter = containerRect.top + containerRect.height / 2;
+    const containerHeight = containerRect.height;
+    
+    let bestIndex = activeSceneIndex;
+    let bestScore = -Infinity;
+    
+    sceneRefsMap.current.forEach((element, index) => {
+      if (!element) return;
+      
+      try {
+        const rect = element.getBoundingClientRect();
+        
+        // Calculate how much of the element is visible in the container
+        const visibleTop = Math.max(rect.top, containerRect.top);
+        const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+        const visibilityRatio = visibleHeight / rect.height;
+        
+        // Calculate distance from container center
+        const elementCenter = rect.top + rect.height / 2;
+        const distanceFromCenter = Math.abs(elementCenter - containerCenter);
+        const normalizedDistance = Math.min(1, distanceFromCenter / (containerHeight / 2));
+        
+        // Combined score: visibility ratio weighted more, distance weighted less
+        const score = visibilityRatio * 0.85 + (1 - normalizedDistance) * 0.15;
+        
+        // Only consider elements that are at least 30% visible
+        if (visibilityRatio > 0.3 && score > bestScore) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      } catch (e) {
+        // Skip if element is not in DOM
+      }
+    });
+    
+    // Update active scene if we found a different one
+    if (bestIndex !== activeSceneIndex && bestIndex >= 0 && bestIndex < scenesData.length) {
+      // Temporarily disable auto-sync when updating from scroll
+      isUserScrolling.current = true;
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollTimeoutRef.current = setTimeout(() => {
+        isUserScrolling.current = false;
+      }, 300);
+      
+      setActiveSceneIndex(bestIndex);
+    }
+  }, [currentStep, activeSceneIndex, scenesData.length]);
+
+  const handleRightPanelScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (currentStep !== 3 || isSyncingFromLeftRef.current) return;
+    
+    const rightContainer = e.currentTarget;
+    const leftContainer = leftPanelScrollRef.current;
+    
+    if (!leftContainer) return;
+    
+    isSyncingFromRightRef.current = true;
+    const leftMaxScroll = Math.max(0, leftContainer.scrollHeight - leftContainer.clientHeight);
+    const rightMaxScroll = Math.max(0, rightContainer.scrollHeight - rightContainer.clientHeight);
+    
+    if (leftMaxScroll > 0 && rightMaxScroll > 0) {
+      const rightScrollPercent = Math.min(1, Math.max(0, rightContainer.scrollTop / rightMaxScroll));
+      leftContainer.scrollTop = rightScrollPercent * leftMaxScroll;
+    } else if (rightMaxScroll > 0 && leftMaxScroll === 0) {
+      // Left panel doesn't need to scroll, do nothing
+    }
+    
+    setTimeout(() => {
+      isSyncingFromRightRef.current = false;
+    }, 10);
+  }, [currentStep, horizontalPreviewTab]);
+
+  const handleVerticalLeftPanelScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (currentStep !== 3 || horizontalPreviewTab !== 'vertical') return;
+    
+    const leftContainer = e.currentTarget;
+    const rightContainer = rightPanelScrollRef.current;
+    
+    // Sync scroll with right panel
+    if (!isSyncingFromRightRef.current && rightContainer) {
+      isSyncingFromLeftRef.current = true;
+      const leftMaxScroll = Math.max(0, leftContainer.scrollHeight - leftContainer.clientHeight);
+      const rightMaxScroll = Math.max(0, rightContainer.scrollHeight - rightContainer.clientHeight);
+      
+      if (leftMaxScroll > 0 && rightMaxScroll > 0) {
+        const leftScrollPercent = Math.min(1, Math.max(0, leftContainer.scrollTop / leftMaxScroll));
+        rightContainer.scrollTop = leftScrollPercent * rightMaxScroll;
+      }
+      
+      setTimeout(() => {
+        isSyncingFromLeftRef.current = false;
+      }, 10);
+    }
+    
+    // Detect which scene is most visible and highlight it
+    const containerRect = leftContainer.getBoundingClientRect();
+    const containerCenter = containerRect.top + containerRect.height / 2;
+    const containerHeight = containerRect.height;
+    
+    let bestIndex = activeSceneIndex;
+    let bestScore = -Infinity;
+    
+    sceneRefsMap.current.forEach((element, index) => {
+      if (!element) return;
+      
+      try {
+        const rect = element.getBoundingClientRect();
+        const visibleTop = Math.max(rect.top, containerRect.top);
+        const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+        const visibilityRatio = visibleHeight / rect.height;
+        const elementCenter = rect.top + rect.height / 2;
+        const distanceFromCenter = Math.abs(elementCenter - containerCenter);
+        const normalizedDistance = Math.min(1, distanceFromCenter / (containerHeight / 2));
+        const score = visibilityRatio * 0.85 + (1 - normalizedDistance) * 0.15;
+        
+        if (visibilityRatio > 0.3 && score > bestScore) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      } catch (e) {
+        // Skip if element is not in DOM
+      }
+    });
+    
+    if (bestIndex !== activeSceneIndex && bestIndex >= 0 && bestIndex < scenesData.length) {
+      isUserScrolling.current = true;
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollTimeoutRef.current = setTimeout(() => {
+        isUserScrolling.current = false;
+      }, 300);
+      setActiveSceneIndex(bestIndex);
+    }
+  }, [currentStep, activeSceneIndex, scenesData.length, horizontalPreviewTab]);
+
+  // Auto-scroll RHS to active scene's details when activeSceneIndex changes
+  useEffect(() => {
+    if (currentStep !== 3) return;
+    
+    const activeSceneDetailsElement = sceneDetailsRefsMap.current.get(activeSceneIndex);
+    const rightContainer = rightPanelScrollRef.current;
+    
+    if (activeSceneDetailsElement && rightContainer && !isSyncingFromRightRef.current) {
+      // Temporarily disable sync to prevent feedback loop
+      isSyncingFromRightRef.current = true;
+      
+      // Calculate scroll position to center the active scene's details
+      const elementTop = activeSceneDetailsElement.offsetTop;
+      const elementHeight = activeSceneDetailsElement.offsetHeight;
+      const containerHeight = rightContainer.clientHeight;
+      
+      // Scroll to center the active scene's details in the viewport
+      const scrollPosition = elementTop - (containerHeight / 2) + (elementHeight / 2);
+      
+      rightContainer.scrollTo({
+        top: Math.max(0, scrollPosition),
+        behavior: 'smooth'
+      });
+      
+      setTimeout(() => {
+        isSyncingFromRightRef.current = false;
+      }, 500); // Wait for smooth scroll to complete
+    }
+  }, [activeSceneIndex, currentStep]);
+
+  // Sync heights between LHS scene thumbnails and RHS details sections
+  useEffect(() => {
+    if (currentStep !== 3) return;
+
+    const updateHeights = () => {
+      sceneRefsMap.current.forEach((element, index) => {
+        if (element) {
+          const height = element.offsetHeight;
+          sceneThumbnailHeights.current.set(index, height);
+          
+          // Apply height to corresponding details section
+          const detailsElement = sceneDetailsRefsMap.current.get(index);
+          if (detailsElement && height > 0) {
+            detailsElement.style.minHeight = `${height}px`;
+          }
+        }
+      });
+    };
+
+    // Initial measurement with a small delay to ensure DOM is ready
+    const initialTimeout = setTimeout(() => {
+      updateHeights();
+    }, 100);
+
+    // Use ResizeObserver to track height changes
+    const resizeObserver = new ResizeObserver(() => {
+      updateHeights();
+    });
+
+    // Observe all scene thumbnails
+    sceneRefsMap.current.forEach((element) => {
+      if (element) {
+        resizeObserver.observe(element);
+      }
+    });
+
+    // Also observe details elements for any changes
+    sceneDetailsRefsMap.current.forEach((element) => {
+      if (element) {
+        resizeObserver.observe(element);
+      }
+    });
+
+    // Also observe window resize
+    window.addEventListener('resize', updateHeights);
+
+    // Re-measure when scenes change
+    const scenesChangeTimeout = setTimeout(() => {
+      updateHeights();
+    }, 200);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearTimeout(scenesChangeTimeout);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateHeights);
+    };
+  }, [currentStep, scenesData.length, horizontalPreviewTab]);
 
   const filteredVideos = slikeVideos.filter((video) =>
     video.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1038,10 +1887,7 @@ export function VideoCreationForm({
     // Skip steps based on format
     let nextStep = currentStep + 1;
     
-    // If format is "9:16", skip horizontal preview step (step 3)
-    if (formData.format === "9:16" && nextStep === 3) {
-      nextStep = steps.length; // Skip to end (no preview step for 9:16)
-    }
+    // No longer skipping preview step for 9:16 - it now has vertical preview
     
     if (nextStep < steps.length) {
       setCurrentStep(nextStep);
@@ -1062,10 +1908,7 @@ export function VideoCreationForm({
     // Skip steps based on format when going back
     let prevStep = currentStep - 1;
     
-    // If format is "9:16", skip horizontal preview step (step 3)
-    if (formData.format === "9:16" && prevStep === 3) {
-      prevStep = 2; // Go back to BG AUDIO
-    }
+    // No longer skipping preview step for 9:16 - it now has vertical preview
     
     if (prevStep >= 0) {
       setCurrentStep(prevStep);
@@ -1356,13 +2199,11 @@ export function VideoCreationForm({
                         <Check className="w-4 h-4" />
                       )}
                     </TabsTrigger>
-                    <TabsTrigger value="vertical" className="flex-1 gap-2 relative">
+                    <TabsTrigger value="vertical" className="flex-1 gap-2">
                       <Smartphone className="w-4 h-4" />
                       Vertical
-                      {templateFormatTab === "horizontal" && !formData.selectedTheme9x16 && (
-                        <div className="absolute left-0 right-0 top-full mt-1 text-center z-10">
-                          <p className="text-[10px] text-muted-foreground">Vertical Template is to be selected</p>
-                        </div>
+                      {formData.selectedTheme9x16 && (
+                        <Check className="w-4 h-4" />
                       )}
                     </TabsTrigger>
                   </TabsList>
@@ -1450,172 +2291,104 @@ export function VideoCreationForm({
           </div>
         );
 
-      case 2: // BG AUDIO
-        const filteredMusicTracks = musicTracks.filter((track) =>
-          track.name.toLowerCase().includes(musicSearchQuery.toLowerCase())
-        );
-        const filteredUploadedMusic = uploadedMusic.filter((track) =>
-          track.name.toLowerCase().includes(musicSearchQuery.toLowerCase())
-        );
+      case 2: // Configuration
+        // Get all available music tracks for dropdown
+        const allMusicTracks = [...musicTracks, ...uploadedMusic, { id: "none", name: "No Background Music", duration: "0:00", source: "None" }];
+        const selectedMusicTrack = allMusicTracks.find(track => track.name === formData.backgroundMusic) || allMusicTracks[allMusicTracks.length - 1];
         
-        // Filter tracks based on selected filter
-        let displayedTracks: Array<{ id: string; name: string; duration: string; source: string; category?: string }> = [];
-        
-        if (musicFilter === "all") {
-          displayedTracks = [...filteredMusicTracks, ...filteredUploadedMusic];
-        } else if (musicFilter === "my-uploads") {
-          displayedTracks = filteredUploadedMusic;
-        } else if (musicFilter === "previously-used") {
-          displayedTracks = filteredMusicTracks.filter(track => track.category === "Previously Used");
-        } else if (musicFilter === "ai-recommended") {
-          displayedTracks = filteredMusicTracks.filter(track => track.category === "AI Recommended");
-        }
+        // Filter slates based on search
+        const filteredPreSlates = slateOptions.filter(slate => 
+          slate.type === "pre" && slate.name.toLowerCase().includes(preSlateSearchQuery.toLowerCase())
+        );
+        const filteredPostSlates = slateOptions.filter(slate => 
+          slate.type === "post" && slate.name.toLowerCase().includes(postSlateSearchQuery.toLowerCase())
+        );
 
         return (
-          <div className="space-y-3">
-                  <div>
-              {/* Search, Filter and Upload */}
-              <div className="flex items-center gap-2 mb-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search music tracks..."
-                    value={musicSearchQuery}
-                    onChange={(e) => setMusicSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
+          <div className="space-y-6">
+            {/* Section 1: Background Audio */}
+            <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
+              {/* Section Header with Dropdown */}
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Music className="w-5 h-5 text-primary" />
                 </div>
-                {/* Filter Buttons */}
-                <div className="flex items-center gap-1 border border-border rounded-lg p-1">
-                  <button
-                    onClick={() => setMusicFilter("all")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
-                      musicFilter === "all"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    All
-                  </button>
-                  <button
-                    onClick={() => setMusicFilter("previously-used")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
-                      musicFilter === "previously-used"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    Previously Used
-                  </button>
-                  <button
-                    onClick={() => setMusicFilter("ai-recommended")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
-                      musicFilter === "ai-recommended"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    AI Recommended
-                  </button>
-                  <button
-                    onClick={() => setMusicFilter("my-uploads")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-md text-sm font-medium transition-all",
-                      musicFilter === "my-uploads"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    My Uploads
-                  </button>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-lg font-semibold">Background Audio</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Select and customize background music for your video</p>
+                    </div>
+                    <Select
+                      value={formData.backgroundMusic || "none"}
+                      onValueChange={(value) => {
+                        if (value === "none") {
+                          setFormData({ ...formData, backgroundMusic: "none" });
+                          setSelectedMusicForEdit(null);
+                          if (musicAudioRef.current) {
+                            musicAudioRef.current.pause();
+                            musicAudioRef.current.currentTime = 0;
+                          }
+                          setIsMusicPlaying(false);
+                        } else {
+                          const track = allMusicTracks.find(t => t.id === value || t.name === value);
+                          if (track && track.id !== "none") {
+                            setFormData({ ...formData, backgroundMusic: track.name });
+                            setSelectedMusicForEdit(track);
+                            setMusicEndTime(track.duration);
+                            setMusicStartTime("00:00");
+                            setMusicCurrentTime(0);
+                            if (musicAudioRef.current) {
+                              musicAudioRef.current.pause();
+                              musicAudioRef.current.currentTime = 0;
+                            }
+                            setIsMusicPlaying(false);
+                          }
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-[300px]">
+                        <SelectValue placeholder="Select background audio" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Background Music</SelectItem>
+                        {musicTracks.map((track) => (
+                          <SelectItem key={track.id} value={track.name}>
+                            {track.name} ({track.duration})
+                          </SelectItem>
+                        ))}
+                        {uploadedMusic.map((track) => (
+                          <SelectItem key={track.id} value={track.name}>
+                            {track.name} ({track.duration})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <Button variant="outline" size="icon" onClick={() => {
-                  // Handle upload - in real app, this would open file picker
-                  const newId = `um${uploadedMusic.length + 1}`;
-                  setUploadedMusic([...uploadedMusic, {
-                    id: newId,
-                    name: `Uploaded Track ${uploadedMusic.length + 1}`,
-                    duration: "0:00",
-                    source: "Uploaded"
-                  }]);
-                }}>
-                  <Upload className="w-4 h-4" />
-                </Button>
               </div>
-
-              {/* Music Tracks Grid */}
-              <div className="grid grid-cols-1 gap-2">
-                {displayedTracks.length > 0 ? (
-                  displayedTracks.map((track) => {
-                    const isSelected = formData.backgroundMusic === track.name;
-                    const isEditing = selectedMusicForEdit?.id === track.id;
-                    
-                    // If this track is being edited, show expanded card with all controls
-                    if (isEditing && selectedMusicForEdit) {
-                      return (
-                        <div key={track.id} className="p-5 rounded-lg border border-primary bg-primary/5 ring-2 ring-primary/20 space-y-4">
-                          {/* Header with track info, checkmark, and time inputs */}
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
-                              <Music className="w-6 h-6 text-primary" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-base font-semibold text-foreground">
-                                {selectedMusicForEdit.name}
-                              </p>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {selectedMusicForEdit.category || selectedMusicForEdit.source} • {selectedMusicForEdit.duration}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-2">
-                                <Label className="text-xs font-medium text-muted-foreground">Start</Label>
-                                <Input
-                                  type="text"
-                                  value={musicStartTime}
-                                  onChange={(e) => setMusicStartTime(e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="w-20 h-8 text-center text-xs font-medium"
-                                  placeholder="00:00"
-                                />
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Label className="text-xs font-medium text-muted-foreground">End</Label>
-                                <Input
-                                  type="text"
-                                  value={musicEndTime}
-                                  onChange={(e) => setMusicEndTime(e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="w-20 h-8 text-center text-xs font-medium"
-                                  placeholder="00:00"
-                                />
-                              </div>
-                              <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shrink-0">
-                                <Check className="w-4 h-4 text-primary-foreground" />
-                              </div>
-                            </div>
-                          </div>
                           
-                          {/* Audio Player */}
-                          <div className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg border">
+              {formData.backgroundMusic && formData.backgroundMusic !== "none" && selectedMusicTrack && selectedMusicTrack.id !== "none" && (
+                <div className="space-y-4 pt-4 border-t border-border">
+                    
+                    {/* Play Button and Timeline Row */}
+                    <div className="flex items-center gap-2">
+                      {/* Play Button */}
                             <Button
-                              variant="ghost"
+                        variant="outline"
                               size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
+                        onClick={() => {
                                 if (musicAudioRef.current) {
                                   if (isMusicPlaying) {
                                     musicAudioRef.current.pause();
                                   } else {
+                              musicAudioRef.current.currentTime = parseTime(musicStartTime);
                                     musicAudioRef.current.play();
                                   }
                                   setIsMusicPlaying(!isMusicPlaying);
                                 }
                               }}
-                              className="h-10 w-10"
+                        className="h-10 w-10 flex-shrink-0"
                             >
                               {isMusicPlaying ? (
                                 <Pause className="w-5 h-5" />
@@ -1623,17 +2396,61 @@ export function VideoCreationForm({
                                 <Play className="w-5 h-5 ml-0.5" />
                               )}
                             </Button>
-                            <div className="flex-1">
+                      
+                      {/* Current Time */}
+                      <span className="text-sm text-foreground font-medium min-w-[45px]">
+                        {formatTime(musicCurrentTime)}
+                      </span>
+                      
+                      {/* Timeline Bar */}
+                      <div className="flex-1 relative">
+                        {/* In and Out arrow icons above the bar */}
+                        <div className="absolute -top-5 left-0 right-0 h-5 pointer-events-none z-20">
+                          {/* In arrow (Start marker) */}
                               <div 
-                                className="relative h-3 bg-secondary/50 rounded-full overflow-visible cursor-pointer"
+                            className="absolute top-0 cursor-move pointer-events-auto"
+                            style={{
+                              left: `${(parseTime(musicStartTime) / parseTime(selectedMusicTrack.duration)) * 100}%`,
+                              transform: 'translateX(-50%)',
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setIsDraggingMusicStart(true);
+                            }}
+                          >
+                            <div className="flex flex-col items-center">
+                              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white drop-shadow-md" />
+                              <div className="w-0.5 h-2 bg-white mt-0.5 drop-shadow-md" />
+                            </div>
+                          </div>
+                          {/* Out arrow (End marker) */}
+                          <div
+                            className="absolute top-0 cursor-move pointer-events-auto"
+                            style={{
+                              left: `${(parseTime(musicEndTime) / parseTime(selectedMusicTrack.duration)) * 100}%`,
+                              transform: 'translateX(-50%)',
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setIsDraggingMusicEnd(true);
+                            }}
+                          >
+                            <div className="flex flex-col items-center">
+                              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white drop-shadow-md" />
+                              <div className="w-0.5 h-2 bg-white mt-0.5 drop-shadow-md" />
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div 
+                          className="relative h-4 bg-secondary/50 rounded-full overflow-visible cursor-pointer"
                                 data-music-progress
                                 onClick={(e) => {
-                                  e.stopPropagation();
                                   if (!isDraggingMusicStart && !isDraggingMusicEnd) {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     const clickX = e.clientX - rect.left;
                                     const percentage = Math.max(0, Math.min(1, clickX / rect.width));
-                                    const totalDuration = parseTime(selectedMusicForEdit.duration);
+                              const totalDuration = parseTime(selectedMusicTrack.duration);
                                     const newTime = Math.floor(percentage * totalDuration);
                                     setMusicCurrentTime(newTime);
                                     if (musicAudioRef.current) {
@@ -1646,8 +2463,8 @@ export function VideoCreationForm({
                                 <div
                                   className="absolute h-full bg-primary/30 rounded-full transition-all"
                                   style={{
-                                    left: `${(parseTime(musicStartTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
-                                    width: `${((parseTime(musicEndTime) - parseTime(musicStartTime)) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                              left: `${(parseTime(musicStartTime) / parseTime(selectedMusicTrack.duration)) * 100}%`,
+                              width: `${((parseTime(musicEndTime) - parseTime(musicStartTime)) / parseTime(selectedMusicTrack.duration)) * 100}%`,
                                   }}
                                 />
                                 {/* Played portion within selected area */}
@@ -1655,8 +2472,8 @@ export function VideoCreationForm({
                                   <div
                                     className="absolute h-full bg-primary rounded-full transition-all"
                                     style={{
-                                      left: `${(parseTime(musicStartTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
-                                      width: `${((musicCurrentTime - parseTime(musicStartTime)) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                left: `${(parseTime(musicStartTime) / parseTime(selectedMusicTrack.duration)) * 100}%`,
+                                width: `${((musicCurrentTime - parseTime(musicStartTime)) / parseTime(selectedMusicTrack.duration)) * 100}%`,
                                     }}
                                   />
                                 )}
@@ -1665,7 +2482,7 @@ export function VideoCreationForm({
                                   <div
                                     className="absolute h-full bg-primary/20 rounded-full transition-all"
                                     style={{
-                                      width: `${(musicCurrentTime / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                                width: `${(musicCurrentTime / parseTime(selectedMusicTrack.duration)) * 100}%`,
                                     }}
                                   />
                                 )}
@@ -1673,14 +2490,14 @@ export function VideoCreationForm({
                                 <div
                                   className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full border-2 border-primary shadow-md z-20 cursor-pointer"
                                   style={{
-                                    left: `calc(${(musicCurrentTime / parseTime(selectedMusicForEdit.duration)) * 100}% - 8px)`,
+                              left: `calc(${(musicCurrentTime / parseTime(selectedMusicTrack.duration)) * 100}% - 8px)`,
                                   }}
                                 />
                                 {/* Start marker */}
                                 <div
                                   className="absolute top-1/2 -translate-y-1/2 cursor-move z-10"
                                   style={{
-                                    left: `${(parseTime(musicStartTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                              left: `${(parseTime(musicStartTime) / parseTime(selectedMusicTrack.duration)) * 100}%`,
                                     transform: 'translateX(-50%) translateY(-50%)',
                                   }}
                                   onMouseDown={(e) => {
@@ -1688,13 +2505,13 @@ export function VideoCreationForm({
                                     setIsDraggingMusicStart(true);
                                   }}
                                 >
-                                  <div className="w-3 h-3 bg-primary rounded-full border-2 border-white shadow-md" />
+                            <div className="w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-md" />
                                 </div>
                                 {/* End marker */}
                                 <div
                                   className="absolute top-1/2 -translate-y-1/2 cursor-move z-10"
                                   style={{
-                                    left: `${(parseTime(musicEndTime) / parseTime(selectedMusicForEdit.duration)) * 100}%`,
+                              left: `${(parseTime(musicEndTime) / parseTime(selectedMusicTrack.duration)) * 100}%`,
                                     transform: 'translateX(-50%) translateY(-50%)',
                                   }}
                                   onMouseDown={(e) => {
@@ -1702,18 +2519,10 @@ export function VideoCreationForm({
                                     setIsDraggingMusicEnd(true);
                                   }}
                                 >
-                                  <div className="w-3 h-3 bg-primary rounded-full border-2 border-white shadow-md" />
+                            <div className="w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-md" />
                                 </div>
                               </div>
-                              <div className="flex items-center justify-between mt-2">
-                                <span className="text-sm text-muted-foreground tabular-nums font-medium">
-                                  {formatTime(musicCurrentTime)}
-                                </span>
-                                <span className="text-sm text-muted-foreground tabular-nums font-medium">
-                                  {selectedMusicForEdit.duration}
-                                </span>
-                              </div>
-                            </div>
+                        
                             <audio
                               ref={musicAudioRef}
                               onTimeUpdate={(e) => {
@@ -1734,8 +2543,78 @@ export function VideoCreationForm({
                                   musicAudioRef.current.currentTime = parseTime(musicStartTime);
                                 }
                               }}
-                              src={`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${selectedMusicForEdit.id.replace('m', '').replace('u', '') || '1'}.mp3`}
+                          src={`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${selectedMusicTrack.id.replace('m', '').replace('u', '') || '1'}.mp3`}
                             />
+                      </div>
+                      
+                      {/* Total Duration */}
+                      <span className="text-sm text-foreground font-medium min-w-[45px] text-right">
+                        {selectedMusicTrack.duration}
+                      </span>
+                    </div>
+                    
+                    {/* Bottom Row: Volume Level on Left, Start/End Time on Right */}
+                    <div className="flex items-start gap-6">
+                      {/* Volume Level Controls */}
+                      <div className="flex items-center gap-3 flex-1">
+                        <Label className="text-xs font-medium w-24">Volume Level</Label>
+                        <div className="flex items-center gap-2 flex-1">
+                          <Select
+                            value={formData.backgroundMusicVolumeType || "default"}
+                            onValueChange={(value: "default" | "adaptive" | "custom") => {
+                              setFormData({ ...formData, backgroundMusicVolumeType: value });
+                            }}
+                          >
+                            <SelectTrigger className="w-[140px]" style={{ fontSize: '11px' }}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="default">Default</SelectItem>
+                              <SelectItem value="adaptive">Adaptive Volume</SelectItem>
+                              <SelectItem value="custom">Custom</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {formData.backgroundMusicVolumeType === "custom" && (
+                            <div className="flex items-center gap-2 flex-1">
+                              <Slider
+                                value={[formData.backgroundMusicVolume || 50]}
+                                onValueChange={(value) => {
+                                  setFormData({ ...formData, backgroundMusicVolume: value[0] });
+                                }}
+                                min={0}
+                                max={100}
+                                step={1}
+                                className="flex-1 max-w-[200px]"
+                              />
+                              <span className="text-xs text-muted-foreground w-10">{formData.backgroundMusicVolume || 50}%</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Start Time and End Time on Right */}
+                      <div className="flex items-center gap-4 flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs font-medium">Start Time</Label>
+                          <Input
+                            type="text"
+                            value={musicStartTime}
+                            onChange={(e) => setMusicStartTime(e.target.value)}
+                            className="w-20 h-8 text-center text-xs"
+                            placeholder="00:00"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs font-medium">End Time</Label>
+                          <Input
+                            type="text"
+                            value={musicEndTime}
+                            onChange={(e) => setMusicEndTime(e.target.value)}
+                            className="w-20 h-8 text-center text-xs"
+                            placeholder="00:00"
+                          />
+                        </div>
+                      </div>
                           </div>
                           
                           {/* Mouse move handler for dragging */}
@@ -1748,7 +2627,7 @@ export function VideoCreationForm({
                                   const rect = progressBar.getBoundingClientRect();
                                   const x = e.clientX - rect.left;
                                   const percentage = Math.max(0, Math.min(1, x / rect.width));
-                                  const totalDuration = parseTime(selectedMusicForEdit.duration);
+                            const totalDuration = parseTime(selectedMusicTrack.duration);
                                   const newTime = Math.floor(percentage * totalDuration);
                                   
                                   if (isDraggingMusicStart) {
@@ -1779,238 +2658,282 @@ export function VideoCreationForm({
                             />
                           )}
                         </div>
-                      );
-                    }
-                    
-                    // For non-selected tracks, show simple card
-                    return (
-                    <div
-                      key={track.id}
-                      onClick={() => {
-                          setFormData({ ...formData, backgroundMusic: track.name });
-                        setSelectedMusicForEdit(track);
-                        setMusicEndTime(track.duration);
-                        setMusicStartTime("00:00");
-                          setMusicCurrentTime(0);
-                          if (musicAudioRef.current) {
-                            musicAudioRef.current.pause();
-                            musicAudioRef.current.currentTime = 0;
+                )}
+            </div>
+            
+            {/* Section 2: Logo Upload and Placement */}
+            <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
+              {/* Section Header with Dropdown */}
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Upload className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-lg font-semibold">Logo</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Upload and position your logo on the video</p>
+                    </div>
+                    {uploadedLogo && logoToggle === "upload-logo" ? (
+                      /* Logo Preview and Placement Dropdown in same row */
+                      <div className="flex items-center gap-2">
+                        <div className="relative">
+                          <img src={uploadedLogo} alt="Logo" className="h-12 w-auto object-contain border border-border rounded" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-background border border-border"
+                            onClick={() => {
+                              setUploadedLogo(null);
+                              setLogoToggle("no-logo");
+                              setLogoPlacement(null);
+                            }}
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </Button>
+                        </div>
+                        <Select
+                          value={logoPlacement || ""}
+                          onValueChange={(value: "top-left" | "top-right" | "bottom-left" | "bottom-right") => {
+                            setLogoPlacement(value);
+                          }}
+                        >
+                          <SelectTrigger className="w-[200px] h-8 text-xs">
+                            <SelectValue placeholder="Select logo placement" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="top-left">Top Left</SelectItem>
+                            <SelectItem value="top-right">Top Right</SelectItem>
+                            <SelectItem value="bottom-left">Bottom Left</SelectItem>
+                            <SelectItem value="bottom-right">Bottom Right</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      /* Upload Logo Toggle */
+                      <Select
+                        value={logoToggle}
+                        onValueChange={(value: "no-logo" | "upload-logo") => {
+                          setLogoToggle(value);
+                          if (value === "upload-logo" && !uploadedLogo) {
+                            setIsLogoUploadDialogOpen(true);
+                          } else if (value === "no-logo") {
+                            setUploadedLogo(null);
+                            setLogoPlacement(null);
                           }
-                          setIsMusicPlaying(false);
+                        }}
+                      >
+                        <SelectTrigger className="w-[180px] h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="no-logo">No logo</SelectItem>
+                          <SelectItem value="upload-logo">Upload Logo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                
+                {/* Logo Upload Dialog */}
+                <Dialog open={isLogoUploadDialogOpen} onOpenChange={setIsLogoUploadDialogOpen}>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>Upload Logo</DialogTitle>
+                      <DialogDescription>
+                        Select an image file to use as your logo.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-4 py-4">
+                      <Button
+                        variant="outline"
+                      onClick={() => {
+                          const input = document.createElement('input');
+                          input.type = 'file';
+                          input.accept = 'image/*';
+                          input.onchange = (e) => {
+                            const file = (e.target as HTMLInputElement).files?.[0];
+                            if (file) {
+                              const url = URL.createObjectURL(file);
+                              setUploadedLogo(url);
+                              setIsLogoUploadDialogOpen(false);
+                            }
+                          };
+                          input.click();
+                        }}
+                        className="gap-2"
+                      >
+                        <Upload className="w-4 h-4" />
+                        Choose File
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+            
+            {/* Section 3: Pre and Post Slates */}
+            <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
+              {/* Section Header */}
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Video className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <Label className="text-lg font-semibold">Slates</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Add intro and outro slates to your video</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="grid grid-cols-2 gap-6">
+                  {/* Pre Slate */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Pre Slate</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between h-10">
+                          {preSlate ? slateOptions.find(s => s.id === preSlate)?.name || "No slate" : "No slate"}
+                          <ChevronDown className="w-4 h-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start">
+                        <div className="p-2 border-b">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              placeholder="Search pre slates..."
+                              value={preSlateSearchQuery}
+                              onChange={(e) => setPreSlateSearchQuery(e.target.value)}
+                              className="pl-8"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-[200px] overflow-y-auto">
+                          {/* No slate option */}
+                          <div
+                            onClick={() => {
+                              setPreSlate(null);
                       }}
                       className={cn(
-                        "p-2.5 rounded-lg border cursor-pointer transition-all",
-                          isSelected
-                          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                          : "border-border bg-secondary/30 hover:border-primary/50 hover:bg-secondary/50"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                            isSelected
-                            ? "bg-primary/20"
-                            : "bg-primary/10"
-                        )}>
-                          <Music className={cn(
-                            "w-4 h-4",
-                              isSelected
-                              ? "text-primary"
-                              : "text-primary/70"
-                          )} />
+                              "p-2 cursor-pointer hover:bg-secondary transition-colors",
+                              !preSlate && "bg-primary/10"
+                            )}
+                          >
+                            <p className="text-sm">No slate</p>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-foreground truncate">
-                            {track.name}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {track.category || track.source} • {track.duration}
-                          </p>
+                          {filteredPreSlates.length > 0 ? (
+                            filteredPreSlates.map((slate) => (
+                              <div
+                                key={slate.id}
+                                onClick={() => {
+                                  setPreSlate(slate.id);
+                                }}
+                                className={cn(
+                                  "p-2 cursor-pointer hover:bg-secondary transition-colors",
+                                  preSlate === slate.id && "bg-primary/10"
+                                )}
+                              >
+                                <p className="text-sm">{slate.name}</p>
                         </div>
-                          {isSelected && (
-                          <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                            <Check className="w-3 h-3 text-primary-foreground" />
+                            ))
+                          ) : (
+                            preSlateSearchQuery && (
+                              <div className="p-4 text-center text-sm text-muted-foreground">
+                                No pre slates found
                           </div>
+                            )
                         )}
                       </div>
+                      </PopoverContent>
+                    </Popover>
                     </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground">
-                      {musicFilter === "my-uploads" 
-                        ? "No uploads found. Click the upload button to add music tracks."
-                        : "No music tracks found matching your search."}
-                    </p>
+                  
+                  {/* Post Slate */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Post Slate</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between h-10">
+                          {postSlate ? slateOptions.find(s => s.id === postSlate)?.name || "No slate" : "No slate"}
+                          <ChevronDown className="w-4 h-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start">
+                        <div className="p-2 border-b">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              placeholder="Search post slates..."
+                              value={postSlateSearchQuery}
+                              onChange={(e) => setPostSlateSearchQuery(e.target.value)}
+                              className="pl-8"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-[200px] overflow-y-auto">
+                          {/* No slate option */}
+                          <div
+                            onClick={() => {
+                              setPostSlate(null);
+                            }}
+                            className={cn(
+                              "p-2 cursor-pointer hover:bg-secondary transition-colors",
+                              !postSlate && "bg-primary/10"
+                            )}
+                          >
+                            <p className="text-sm">No slate</p>
+                          </div>
+                          {filteredPostSlates.length > 0 ? (
+                            filteredPostSlates.map((slate) => (
+                              <div
+                                key={slate.id}
+                                onClick={() => {
+                                  setPostSlate(slate.id);
+                                }}
+                                className={cn(
+                                  "p-2 cursor-pointer hover:bg-secondary transition-colors",
+                                  postSlate === slate.id && "bg-primary/10"
+                                )}
+                              >
+                                <p className="text-sm">{slate.name}</p>
+                              </div>
+                            ))
+                          ) : (
+                            postSlateSearchQuery && (
+                              <div className="p-4 text-center text-sm text-muted-foreground">
+                                No post slates found
                   </div>
+                            )
                 )}
               </div>
+                      </PopoverContent>
+                    </Popover>
             </div>
           </div>
-        );
-
-      case 3: // Horizontal Preview
-        const activeSceneHorizontal = scenesData[activeSceneIndex] || scenesData[0];
-        
-        // If format is "9:16", show message that this step is not applicable
-        if (formData.format === "9:16") {
-        return (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center space-y-4">
-                <p className="text-lg text-muted-foreground">Horizontal Preview is not available for vertical format (9:16)</p>
-                <Button onClick={handleNext}>Continue</Button>
+              </div>
               </div>
             </div>
           );
-        }
+
+      case 3: // Preview and Quick Edits (Horizontal or Vertical)
+        const activeScenePreview = scenesData[activeSceneIndex] || scenesData[0];
         
-        // Helper function to render scene details
-        const renderSceneDetails = (scene: typeof scenesData[0], index: number) => {
-          const voiceoverMode = scene.voiceoverMode || (scene.sameAsCaption ? 'sameAsCaption' : 'custom');
-          return (
-            <div className="space-y-2 pl-6 w-full">
-              {/* Caption Section */}
-              <div>
-                <Label className="text-xs font-semibold mb-1 block">Caption</Label>
-                <Textarea
-                  value={scene.caption || ''}
-                  onChange={(e) => {
-                    const updated = [...scenesData];
-                    updated[index].caption = e.target.value;
-                    if (voiceoverMode === 'sameAsCaption') {
-                      updated[index].voiceover = e.target.value;
-                    }
-                    setScenesData(updated);
-                  }}
-                  className="min-h-[32px] text-sm"
-                  placeholder="Enter caption text..."
-                />
-              </div>
-
-              {/* Voiceover Section */}
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Label className="text-xs font-semibold shrink-0">Voiceover</Label>
-                  <div className="flex-1 flex justify-end">
-                    <Select
-                      value={voiceoverMode}
-                      onValueChange={(value: 'noCaption' | 'custom' | 'sameAsCaption') => {
-                        const updated = [...scenesData];
-                        updated[index].voiceoverMode = value;
-                        updated[index].sameAsCaption = value === 'sameAsCaption';
-                        if (value === 'sameAsCaption') {
-                          updated[index].voiceover = updated[index].caption || '';
-                        } else if (value === 'noCaption') {
-                          updated[index].voiceover = '';
-                        }
-                        setScenesData(updated);
-                      }}
-                    >
-                      <SelectTrigger className="w-[140px] h-6 text-xs shrink-0 py-0 px-2 rounded-none">
-                        <SelectValue placeholder="Select voiceover option" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-none">
-                        <SelectItem value="noCaption" className="text-xs rounded-none">No Caption</SelectItem>
-                        <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
-                        <SelectItem value="sameAsCaption" className="text-xs rounded-none">Same as Caption</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {(voiceoverMode === 'custom' || voiceoverMode === 'sameAsCaption') && (
-                  <Textarea
-                    value={scene.voiceover || ''}
-                    onChange={(e) => {
-                      if (voiceoverMode === 'custom') {
-                        const updated = [...scenesData];
-                        updated[index].voiceover = e.target.value;
-                        setScenesData(updated);
-                      }
-                    }}
-                    className="min-h-[36px] text-xs w-full"
-                    placeholder={voiceoverMode === 'sameAsCaption' ? "Same as caption (synced automatically)" : "Enter voiceover text..."}
-                    disabled={voiceoverMode === 'sameAsCaption'}
-                  />
-                )}
-              </div>
-
-              {/* Slide Duration Selection */}
-              <div className="mt-2 pt-2 border-t border-border/50">
-                <div>
-                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Slide Duration</Label>
-                  <div className="flex items-center gap-1 border border-border rounded-md px-2 h-9 bg-background">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 hover:bg-secondary"
-                      onClick={() => {
-                        const currentDuration = scene.duration || "5s";
-                        const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
-                        const newValue = Math.max(1, numericValue - 1);
-                        const updated = [...scenesData];
-                        updated[index].duration = `${newValue}s`;
-                        setScenesData(updated);
-                      }}
-                    >
-                      <Minus className="w-3 h-3" />
-                    </Button>
-                    <Input
-                      type="text"
-                      value={scene.duration || "5s"}
-                      onChange={(e) => {
-                        const updated = [...scenesData];
-                        updated[index].duration = e.target.value;
-                        setScenesData(updated);
-                      }}
-                      className="flex-1 h-6 text-center border-0 p-0 bg-transparent focus-visible:ring-0"
-                      placeholder="5s"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 hover:bg-secondary"
-                      onClick={() => {
-                        const currentDuration = scene.duration || "5s";
-                        const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
-                        const newValue = numericValue + 1;
-                        const updated = [...scenesData];
-                        updated[index].duration = `${newValue}s`;
-                        setScenesData(updated);
-                      }}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        };
-
+        // Show vertical preview for 9:16 format, horizontal preview for 16:9 or both
+        const isVerticalFormat = formData.format === "9:16";
+        
         return (
           <div className="h-full flex flex-col">
-            {/* Preview Format Tabs - Fixed at top */}
-            <Tabs value={horizontalPreviewTab} onValueChange={(v) => setHorizontalPreviewTab(v as "horizontal" | "vertical")} className="w-full mb-4 shrink-0">
-              <TabsList className="w-full grid grid-cols-2">
-                <TabsTrigger value="horizontal" className="flex-1 gap-2">
-                  <Monitor className="w-4 h-4" />
-                  Horizontal
-                </TabsTrigger>
-                <TabsTrigger value="vertical" className="flex-1 gap-2">
-                  <Smartphone className="w-4 h-4" />
-                  Vertical
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-            
-            {/* Unified Scroll Container for all scene rows */}
-            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
-              <Tabs value={horizontalPreviewTab} onValueChange={(v) => setHorizontalPreviewTab(v as "horizontal" | "vertical")} className="w-full">
-                <TabsContent value="horizontal" className="mt-0">
-                  <div className="space-y-0">
+            {/* Single scrollable container with unified rows */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+                      <div 
+                        ref={leftPanelScrollRef} 
+                className="h-full overflow-y-auto scrollbar-hide"
+                        onScroll={handleLeftPanelScroll}
+                      >
                     <DndContext
                       sensors={sensors}
                       collisionDetection={closestCenter}
@@ -2020,471 +2943,482 @@ export function VideoCreationForm({
                         items={scenesData.map((s) => s.id)}
                         strategy={verticalListSortingStrategy}
                       >
-                        {scenesData.map((scene, index) => {
-                          const format = horizontalPreviewTab === "horizontal" ? "16:9" : "9:16";
-                          const renderPreview = (format: "16:9" | "9:16", label: string) => (
-                            <div
-                              key={`${scene.id}-${format}`}
-                              data-scene-preview={index}
-                              className={cn(
-                                "relative rounded-lg border overflow-hidden",
-                                format === "9:16" ? "aspect-[9/16]" : "aspect-video"
-                              )}
-                            >
-                              {scene.mediaUrl && scene.mediaType === 'video' ? (
-                                <video
-                                  src={scene.mediaUrl}
-                                  className="w-full h-full object-cover object-center"
-                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
-                                  muted
-                                  playsInline
-                                />
+                    <div className="space-y-4 p-4">
+                    {scenesData.map((scene, index) => {
+                        const voiceoverMode = scene.voiceoverMode || (scene.sameAsCaption ? 'sameAsCaption' : 'custom');
+                        const isActiveScene = activeSceneIndex === index;
+                        
+                        // Initialize mediaItems if not present (backward compatibility)
+                        // Always ensure at least one media item exists for display
+                        const mediaItems = scene.mediaItems?.length > 0 
+                          ? scene.mediaItems 
+                          : (scene.mediaUrl ? [{
+                              id: `media-${scene.id}-0`,
+                              url: scene.mediaUrl,
+                              type: (scene.mediaType || 'image') as 'image' | 'video',
+                              thumbnail: scene.thumbnail,
+                            }] : [{
+                              id: `media-${scene.id}-0`,
+                              url: scene.thumbnail || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
+                              type: 'image' as const,
+                              thumbnail: scene.thumbnail || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
+                            }]);
+                        
+                        // Get active media item
+                        const activeMediaIndex = scene.activeMediaIndex ?? 0;
+                        const activeMedia = mediaItems[activeMediaIndex] || mediaItems[0];
+                        
+                        const renderPreview = (format: "16:9" | "9:16", label: string) => {
+                          const previewFormat = isVerticalFormat ? "9:16" : "16:9";
+                          return (
+                    <div
+                              key={`${scene.id}-${previewFormat}`}
+                      data-scene-preview={index}
+                      className={cn(
+                                "relative rounded-lg border overflow-hidden w-full",
+                                previewFormat === "9:16" ? "aspect-[9/16]" : "aspect-video"
+                      )}
+                    >
+                            {activeMedia ? (
+                              activeMedia.type === 'video' ? (
+                        <video
+                                  src={activeMedia.url}
+                          className="w-full h-full object-cover object-center"
+                          style={{ objectFit: 'cover', objectPosition: 'center' }}
+                          muted
+                          playsInline
+                        />
                               ) : (
                                 <img
-                                  src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
+                                  src={activeMedia.thumbnail || activeMedia.url || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
                                   alt={`Scene ${scene.id} - ${label}`}
                                   className="w-full h-full object-cover object-center"
                                   style={{ objectFit: 'cover', objectPosition: 'center' }}
                                 />
-                              )}
-                              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
+                              )
+                      ) : (
+                        <img
+                          src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
+                          alt={`Scene ${scene.id} - ${label}`}
+                          className="w-full h-full object-cover object-center"
+                          style={{ objectFit: 'cover', objectPosition: 'center' }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
+                      
+                      {/* Play button for videos */}
+                      {(() => {
+                        const activeMedia = mediaItems.length > 0 && activeMediaIndex !== undefined 
+                          ? mediaItems[activeMediaIndex] 
+                          : null;
+                        const isVideo = activeMedia?.type === 'video' || scene.mediaType === 'video';
+                        if (isVideo) {
+                          return (
+                            <div className="absolute inset-0 flex items-center justify-center z-10">
+                              <Button
+                                variant="secondary"
+                                size="icon"
+                                className="h-12 w-12 rounded-full bg-background/90 hover:bg-background backdrop-blur-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // TODO: Implement video playback
+                                }}
+                              >
+                                <Play className="w-6 h-6" />
+                              </Button>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
-                              {/* Caption overlay - Draggable and Resizable */}
-                              {scene.caption && (() => {
-                                const isCaptionSelected = selectedCaptionIndex === index;
-                                const x = scene.captionX || 0;
-                                const y = scene.captionY || 85;
-                                const width = scene.captionWidth || 100;
-                                const height = scene.captionHeight || undefined;
-                                
-                                const handleCaptionClick = (e: React.MouseEvent) => {
-                                  e.stopPropagation();
-                                  if (isCaptionSelected) {
-                                    setSelectedCaptionIndex(null);
-                                  } else {
-                                    setSelectedCaptionIndex(index);
-                                  }
-                                };
-                                
-                                const handleMouseDown = (e: React.MouseEvent) => {
-                                  if (isCaptionSelected && !isResizingCaption) {
-                                    const container = e.currentTarget.closest('[data-scene-preview]');
-                                    if (container) {
-                                      const rect = container.getBoundingClientRect();
-                                      const offsetX = ((e.clientX - rect.left) / rect.width) * 100 - x;
-                                      const offsetY = ((e.clientY - rect.top) / rect.height) * 100 - y;
-                                      setDragStart({ x: offsetX, y: offsetY });
-                                      setIsDraggingCaption(true);
-                                    }
-                                  }
-                                };
-                                
-                                const handleResizeStart = (e: React.MouseEvent, handle: string) => {
-                                  e.stopPropagation();
-                                  if (isCaptionSelected) {
-                                    setResizeHandle(handle);
-                                    setIsResizingCaption(true);
-                                    const container = e.currentTarget.closest('[data-scene-preview]');
-                                    if (container) {
-                                      const rect = container.getBoundingClientRect();
-                                      setResizeStart({
-                                        x: e.clientX,
-                                        y: e.clientY,
-                                        width: width,
-                                        height: height,
-                                      });
-                                    }
-                                  }
-                                };
-                                
-                                const captionStyle: React.CSSProperties = {
-                                  left: `${x}%`,
-                                  top: `${y}%`,
-                                  width: `${width}%`,
-                                };
-                                if (height !== undefined) {
-                                  captionStyle.height = `${height}%`;
-                                }
-                                
-                                return (
-                                  <div
-                                    className={cn(
-                                      "absolute z-20",
-                                      isCaptionSelected && "cursor-move"
-                                    )}
-                                    style={captionStyle}
-                                    onClick={handleCaptionClick}
-                                    onMouseDown={handleMouseDown}
-                                  >
-                                    {isCaptionSelected && (
-                                      <div className="absolute inset-0 border-2 border-primary rounded pointer-events-none" />
-                                    )}
-                                    
-                                    {(() => {
-                                      const selectedStyle = scene.captionStyle && scene.captionStyle !== "default" 
-                                        ? captionStyles.find(s => s.id === scene.captionStyle)
-                                        : null;
-                                      
-                                      const bgColor = selectedStyle 
-                                        ? selectedStyle.backgroundColor 
-                                        : (scene.captionBackgroundColor || "rgba(0, 0, 0, 0.7)");
-                                      const textColor = selectedStyle 
-                                        ? selectedStyle.textColor 
-                                        : (scene.captionColor || "#FFFFFF");
-                                      const fontFamily = selectedStyle 
-                                        ? selectedStyle.fontFamily 
-                                        : (scene.captionFontFamily || "Inter");
-                                      
-                                      return (
-                                        <div
-                                          className={cn(
-                                            "p-2 rounded cursor-pointer",
-                                            height === undefined ? "min-h-fit" : "h-full",
-                                            isCaptionSelected && bgColor === "transparent" && "border border-primary/30"
-                                          )}
-                                          style={{
-                                            backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
-                                          }}
-                                        >
-                                          <p
-                                            className="font-semibold break-words"
-                                            style={{
-                                              color: textColor,
-                                              fontSize: `${scene.captionFontSize || 16}px`,
-                                              fontFamily: fontFamily,
-                                            }}
-                                          >
-                                            {scene.caption}
-                                          </p>
-                                        </div>
-                                      );
-                                    })()}
-                                    
-                                    {isCaptionSelected && (
-                                      <>
-                                        <div className="absolute -top-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-left')} />
-                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-right')} />
-                                        <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-left')} />
-                                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-right')} />
-                                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top')} />
-                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom')} />
-                                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'left')} />
-                                        <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'right')} />
-                                      </>
-                                    )}
-                                  </div>
-                                );
-                              })()}
+                            {/* Caption overlay - Read-only, follows template */}
+                      {scene.caption && (() => {
+                              // Use template defaults - don't allow user customization
+                              const x = 50; // Center horizontally (template default)
+                              const y = isVerticalFormat ? 50 : 85; // Template default positioning
+                              const width = 90; // 90% width (template default)
                               
-                              <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  className="gap-2"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setReplaceVideoSceneIndex(index);
-                                    setIsReplaceVideoDialogOpen(true);
-                                  }}
+                              const selectedStyle = scene.captionStyle && scene.captionStyle !== "default" 
+                                ? captionStyles.find(s => s.id === scene.captionStyle)
+                                : null;
+                              
+                              // Use style values if style is selected, otherwise use template defaults
+                              const bgColor = selectedStyle 
+                                ? selectedStyle.backgroundColor 
+                                : (scene.captionBackgroundColor || "rgba(0, 0, 0, 0.7)");
+                              const textColor = selectedStyle 
+                                ? selectedStyle.textColor 
+                                : (scene.captionColor || "#FFFFFF");
+                              const fontFamily = selectedStyle 
+                                ? selectedStyle.fontFamily 
+                                : (scene.captionFontFamily || "Inter");
+                              
+                              const captionStyle: React.CSSProperties = {
+                                left: `${x}%`,
+                                top: `${y}%`,
+                                width: `${width}%`,
+                                transform: 'translateX(-50%)', // Center horizontally
+                                pointerEvents: 'none', // Disable all interactions
+                              };
+                              
+                              return (
+                                <div
+                                  className="absolute z-20"
+                                  style={captionStyle}
+                                  data-caption-overlay
                                 >
-                                  <Upload className="w-4 h-4" />
-                                  Replace Video
-                                </Button>
-                              </div>
-                            </div>
-                          );
-
-                          return (
-                            <div
-                              key={scene.id}
-                              className={cn(
-                                "flex gap-6 pb-3 border-b border-border/50 last:border-b-0 last:pb-0 w-full",
-                                activeSceneIndex === index && "bg-muted/30"
-                              )}
-                              ref={(node) => {
-                                if (node) {
-                                  sceneRefsMap.current.set(index, node);
-                                } else {
-                                  sceneRefsMap.current.delete(index);
-                                }
-                              }}
-                            >
-                              <div className="w-[300px] shrink-0">
-                                <SortableSceneItem
-                                  scene={scene}
-                                  index={index}
-                                  activeSceneIndex={activeSceneIndex}
-                                  selectedCaptionIndex={selectedCaptionIndex}
-                                  setActiveSceneIndex={(idx) => {
-                                    isUserScrolling.current = true;
-                                    if (scrollTimeoutRef.current) {
-                                      clearTimeout(scrollTimeoutRef.current);
-                                    }
-                                    scrollTimeoutRef.current = setTimeout(() => {
-                                      isUserScrolling.current = false;
-                                    }, 500);
-                                    setActiveSceneIndex(idx);
-                                  }}
-                                  setSelectedCaptionIndex={setSelectedCaptionIndex}
-                                  format={format as "16:9" | "9:16"}
-                                  renderPreview={renderPreview}
-                                  sceneRef={() => {}}
-                                />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                {renderSceneDetails(scene, index)}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </SortableContext>
-                    </DndContext>
-                    <Button
-                      variant="outline"
-                      className="w-full mt-3 border-dashed"
-                      onClick={handleAddScene}
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add Scene
-                    </Button>
-                  </div>
-                </TabsContent>
-                
-                <TabsContent value="vertical" className="mt-0">
-                  <div className="space-y-0">
-                    <DndContext
-                      sensors={sensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={handleDragEnd}
-                    >
-                      <SortableContext
-                        items={scenesData.map((s) => s.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        {scenesData.map((scene, index) => {
-                          const format = "9:16";
-                          const renderPreview = (format: "16:9" | "9:16", label: string) => (
-                            <div
-                              key={`${scene.id}-${format}`}
-                              data-scene-preview={index}
-                              className={cn(
-                                "relative rounded-lg border overflow-hidden",
-                                format === "9:16" ? "aspect-[9/16]" : "aspect-video"
-                              )}
-                            >
-                              {scene.mediaUrl && scene.mediaType === 'video' ? (
-                                <video
-                                  src={scene.mediaUrl}
-                                  className="w-full h-full object-cover object-center"
-                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
-                                  muted
-                                  playsInline
-                                />
-                              ) : (
-                                <img
-                                  src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
-                                  alt={`Scene ${scene.id} - ${label}`}
-                                  className="w-full h-full object-cover object-center"
-                                  style={{ objectFit: 'cover', objectPosition: 'center' }}
-                                />
-                              )}
-                              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
-                              {scene.caption && (() => {
-                                const isCaptionSelected = selectedCaptionIndex === index;
-                                const x = scene.captionX || 0;
-                                const y = scene.captionY || 85;
-                                const width = scene.captionWidth || 100;
-                                const height = scene.captionHeight || undefined;
-                                
-                                const handleCaptionClick = (e: React.MouseEvent) => {
-                                  e.stopPropagation();
-                                  if (isCaptionSelected) {
-                                    setSelectedCaptionIndex(null);
-                                  } else {
-                                    setSelectedCaptionIndex(index);
-                                  }
-                                };
-                                
-                                const handleMouseDown = (e: React.MouseEvent) => {
-                                  if (isCaptionSelected && !isResizingCaption) {
-                                    const container = e.currentTarget.closest('[data-scene-preview]');
-                                    if (container) {
-                                      const rect = container.getBoundingClientRect();
-                                      const offsetX = ((e.clientX - rect.left) / rect.width) * 100 - x;
-                                      const offsetY = ((e.clientY - rect.top) / rect.height) * 100 - y;
-                                      setDragStart({ x: offsetX, y: offsetY });
-                                      setIsDraggingCaption(true);
-                                    }
-                                  }
-                                };
-                                
-                                const handleResizeStart = (e: React.MouseEvent, handle: string) => {
-                                  e.stopPropagation();
-                                  if (isCaptionSelected) {
-                                    setResizeHandle(handle);
-                                    setIsResizingCaption(true);
-                                    const container = e.currentTarget.closest('[data-scene-preview]');
-                                    if (container) {
-                                      const rect = container.getBoundingClientRect();
-                                      setResizeStart({
-                                        x: e.clientX,
-                                        y: e.clientY,
-                                        width: width,
-                                        height: height,
-                                      });
-                                    }
-                                  }
-                                };
-                                
-                                const captionStyle: React.CSSProperties = {
-                                  left: `${x}%`,
-                                  top: `${y}%`,
-                                  width: `${width}%`,
-                                };
-                                if (height !== undefined) {
-                                  captionStyle.height = `${height}%`;
-                                }
-                                
-                                return (
+                                  {/* Caption content with bottom padding to prevent cropping */}
                                   <div
-                                    className={cn(
-                                      "absolute z-20",
-                                      isCaptionSelected && "cursor-move"
-                                    )}
-                                    style={captionStyle}
-                                    onClick={handleCaptionClick}
-                                    onMouseDown={handleMouseDown}
-                                  >
-                                    {isCaptionSelected && (
-                                      <div className="absolute inset-0 border-2 border-primary rounded pointer-events-none" />
-                                    )}
-                                    {(() => {
-                                      const selectedStyle = scene.captionStyle && scene.captionStyle !== "default" 
-                                        ? captionStyles.find(s => s.id === scene.captionStyle)
-                                        : null;
-                                      const bgColor = selectedStyle 
-                                        ? selectedStyle.backgroundColor 
-                                        : (scene.captionBackgroundColor || "rgba(0, 0, 0, 0.7)");
-                                      const textColor = selectedStyle 
-                                        ? selectedStyle.textColor 
-                                        : (scene.captionColor || "#FFFFFF");
-                                      const fontFamily = selectedStyle 
-                                        ? selectedStyle.fontFamily 
-                                        : (scene.captionFontFamily || "Inter");
-                                      
-                                      return (
-                                        <div
-                                          className={cn(
-                                            "p-2 rounded cursor-pointer",
-                                            height === undefined ? "min-h-fit" : "h-full",
-                                            isCaptionSelected && bgColor === "transparent" && "border border-primary/30"
-                                          )}
-                                          style={{
-                                            backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
-                                          }}
-                                        >
-                                          <p
-                                            className="font-semibold break-words"
-                                            style={{
-                                              color: textColor,
-                                              fontSize: `${scene.captionFontSize || 16}px`,
-                                              fontFamily: fontFamily,
-                                            }}
-                                          >
-                                            {scene.caption}
-                                          </p>
-                                        </div>
-                                      );
-                                    })()}
-                                    {isCaptionSelected && (
-                                      <>
-                                        <div className="absolute -top-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-left')} />
-                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top-right')} />
-                                        <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nesw-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-left')} />
-                                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-primary border border-white rounded-full cursor-nwse-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom-right')} />
-                                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'top')} />
-                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1.5 bg-primary border border-white rounded cursor-ns-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'bottom')} />
-                                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'left')} />
-                                        <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary border border-white rounded cursor-ew-resize z-30" onMouseDown={(e) => handleResizeStart(e, 'right')} />
-                                      </>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                              <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  className="gap-2"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setReplaceVideoSceneIndex(index);
-                                    setIsReplaceVideoDialogOpen(true);
+                                    className="p-2 pb-4 rounded"
+                                  style={{
+                                    backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
+                                    marginBottom: '8px', // Extra margin to prevent cropping
                                   }}
                                 >
-                                  <Upload className="w-4 h-4" />
-                                  Replace Video
-                                </Button>
-                              </div>
-                            </div>
-                          );
+                                  <p
+                                    className="font-semibold break-words"
+                                    style={{
+                                      color: textColor,
+                                      fontSize: `${scene.captionFontSize || 16}px`,
+                                      fontFamily: fontFamily,
+                                        lineHeight: '1.5', // Better line spacing
+                                        marginBottom: '0', // Ensure no extra margin
+                                        paddingBottom: '4px', // Small padding to prevent text cutoff
+                                    }}
+                                  >
+                                    {scene.caption}
+                                  </p>
+                                </div>
+                          </div>
+                        );
+                      })()}
+                      
+                            {/* Replace Media overlay button */}
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="gap-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReplaceVideoSceneIndex(index);
+                            setIsReplaceVideoDialogOpen(true);
+                          }}
+                        >
+                          <Upload className="w-4 h-4" />
+                                Replace Media
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                        };
 
-                          return (
-                            <div
-                              key={scene.id}
-                              className={cn(
-                                "flex gap-6 pb-3 border-b border-border/50 last:border-b-0 last:pb-0 w-full",
-                                activeSceneIndex === index && "bg-muted/30"
+                      return (
+                          <SortableSceneRow key={scene.id} sceneId={scene.id}>
+                            {({ attributes, listeners, setNodeRef, style }) => (
+                              <div
+                                ref={(node) => {
+                                  setNodeRef(node);
+                                  if (node) {
+                                    sceneRefsMap.current.set(index, node);
+                                    sceneDetailsRefsMap.current.set(index, node);
+                                  } else {
+                                    sceneRefsMap.current.delete(index);
+                                    sceneDetailsRefsMap.current.delete(index);
+                                  }
+                                }}
+                                style={style}
+                                className={cn(
+                                  "flex gap-4 rounded-lg p-4 transition-all border",
+                                  isActiveScene 
+                                    ? "border-2 border-primary ring-2 ring-primary/30 shadow-md bg-primary/5" 
+                                    : "border-border",
+                                  index < scenesData.length - 1 && "mb-4 pb-4 border-b"
+                                )}
+                              >
+                            {/* Left Side - Scene Preview */}
+                            <div className={cn(
+                              "flex-shrink-0 flex flex-col gap-3",
+                              isVerticalFormat ? "w-[200px]" : "w-[300px]"
+                            )}>
+                              {/* Non-sortable thumbnail preview - sorting is handled at row level */}
+                              <div
+                                className={cn(
+                                  "relative rounded-lg border-2 overflow-hidden transition-all cursor-pointer",
+                                  isActiveScene
+                                    ? "border-primary ring-2 ring-primary/30 shadow-md"
+                                    : "border-border hover:border-primary/50"
+                                )}
+                                onClick={(e) => {
+                                  if (!(e.target as HTMLElement).closest('[data-caption-overlay]')) {
+                            isUserScrolling.current = true;
+                            if (scrollTimeoutRef.current) {
+                              clearTimeout(scrollTimeoutRef.current);
+                            }
+                            scrollTimeoutRef.current = setTimeout(() => {
+                              isUserScrolling.current = false;
+                            }, 500);
+                                    setActiveSceneIndex(index);
+                                    setSelectedCaptionIndex(null);
+                                  }
+                                }}
+                              >
+                                <div className={isVerticalFormat ? "max-w-[200px] mx-auto" : ""}>
+                                  <div className="p-2">
+                                    {renderPreview(isVerticalFormat ? "9:16" : "16:9", isVerticalFormat ? "Vertical" : "Horizontal")}
+                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Media Items Thumbnails - Always show all media items */}
+                              {mediaItems.length > 0 && (
+                                <div className="w-full">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <Label className="text-xs font-semibold block text-muted-foreground">Media Items</Label>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 text-xs px-2"
+                                      onClick={() => {
+                                        setIsAddingMedia(true);
+                                        setAddMediaSceneIndex(index);
+                                        setReplaceVideoSceneIndex(index);
+                                        setReplaceVideoTab("upload");
+                                        setReplaceVideoSearchQuery("");
+                                        setIsReplaceVideoDialogOpen(true);
+                                      }}
+                                    >
+                                      <Plus className="w-3 h-3 mr-1" />
+                                      Add
+                                    </Button>
+                                  </div>
+                                  {mediaItems.length > 1 ? (
+                          <SortableContext
+                                      items={mediaItems.map(item => item.id)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                                      <div className="grid grid-cols-3 gap-2">
+                                        {mediaItems.map((mediaItem, mediaIndex) => (
+                                          <SortableMediaItem
+                                            key={mediaItem.id}
+                                            mediaItem={mediaItem}
+                                            index={mediaIndex}
+                                            isActive={mediaIndex === activeMediaIndex}
+                                            canDelete={mediaItems.length > 1}
+                                            onSelect={() => {
+                                              const updated = [...scenesData];
+                                              updated[index] = {
+                                                ...updated[index],
+                                                activeMediaIndex: mediaIndex,
+                                                mediaItems: updated[index].mediaItems || mediaItems,
+                                              };
+                                              setScenesData(updated);
+                                            }}
+                                            onDelete={() => {
+                                              const updated = [...scenesData];
+                                              const currentMediaItems = updated[index].mediaItems || mediaItems;
+                                              const newMediaItems = currentMediaItems.filter((_, i) => i !== mediaIndex);
+                                              
+                                              // Update activeMediaIndex if needed
+                                              let newActiveIndex = updated[index].activeMediaIndex ?? 0;
+                                              if (mediaIndex === newActiveIndex) {
+                                                // If deleting the active item, switch to the first item
+                                                newActiveIndex = newMediaItems.length > 0 ? 0 : undefined;
+                                              } else if (mediaIndex < newActiveIndex) {
+                                                // If deleting an item before the active one, adjust index
+                                                newActiveIndex = newActiveIndex - 1;
+                                              }
+                                              
+                                              updated[index] = {
+                                                ...updated[index],
+                                                mediaItems: newMediaItems.length > 0 ? newMediaItems : undefined,
+                                                activeMediaIndex: newActiveIndex,
+                                                // Fallback to mediaUrl if no mediaItems left
+                                                ...(newMediaItems.length === 0 && {
+                                                  mediaUrl: undefined,
+                                                  mediaType: undefined,
+                                                }),
+                                              };
+                                              setScenesData(updated);
+                                            }}
+                                          />
+                                        ))}
+                                      </div>
+                                    </SortableContext>
+                                  ) : (
+                                    <div className="grid grid-cols-3 gap-2">
+                                      {mediaItems.map((mediaItem, mediaIndex) => (
+                                        <SortableMediaItem
+                                          key={mediaItem.id}
+                                          mediaItem={mediaItem}
+                                          index={mediaIndex}
+                                          isActive={mediaIndex === activeMediaIndex}
+                                          canDelete={false}
+                                          onSelect={() => {
+                                            const updated = [...scenesData];
+                                            updated[index] = {
+                                              ...updated[index],
+                                              activeMediaIndex: mediaIndex,
+                                              mediaItems: updated[index].mediaItems || mediaItems,
+                                            };
+                                            setScenesData(updated);
+                                          }}
+                                          onDelete={() => {
+                                            // Prevent deletion if only one item
+                                          }}
+                                        />
+                                      ))}
+                                            </div>
+                                        )}
+                                      </div>
                               )}
-                              ref={(node) => {
-                                if (node) {
-                                  sceneRefsMap.current.set(index, node);
-                                } else {
-                                  sceneRefsMap.current.delete(index);
-                                }
-                              }}
-                            >
-                              <div className="w-[300px] shrink-0">
-                                <SortableSceneItem
-                                  scene={scene}
-                                  index={index}
-                                  activeSceneIndex={activeSceneIndex}
-                                  selectedCaptionIndex={selectedCaptionIndex}
-                                  setActiveSceneIndex={(idx) => {
-                                    isUserScrolling.current = true;
-                                    if (scrollTimeoutRef.current) {
-                                      clearTimeout(scrollTimeoutRef.current);
-                                    }
-                                    scrollTimeoutRef.current = setTimeout(() => {
-                                      isUserScrolling.current = false;
-                                    }, 500);
-                                    setActiveSceneIndex(idx);
-                                  }}
-                                  setSelectedCaptionIndex={setSelectedCaptionIndex}
-                                  format={format as "16:9" | "9:16"}
-                                  renderPreview={renderPreview}
-                                  sceneRef={() => {}}
-                                />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                {renderSceneDetails(scene, index)}
-                              </div>
                             </div>
-                          );
-                        })}
-                      </SortableContext>
-                    </DndContext>
-                    <Button
-                      variant="outline"
-                      className="w-full mt-3 border-dashed"
-                      onClick={handleAddScene}
+
+                            {/* Right Side - Scene Details */}
+                            <div className="flex-1 flex flex-col space-y-3 min-w-0">
+                              {/* Caption Section with Duration */}
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <Label className="text-xs font-semibold">Caption</Label>
+                                  <div className="flex items-center gap-2">
+                                    <Label className="text-xs font-semibold">Scene Duration</Label>
+                                    <div className="flex items-center gap-1 border border-border rounded-md px-1.5 h-7 bg-background">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-5 w-5 hover:bg-secondary"
+                                        onClick={() => {
+                                          const currentDuration = scene.duration || "5s";
+                                          const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
+                                          const newValue = Math.max(1, numericValue - 1);
+                                          const updated = [...scenesData];
+                                          updated[index].duration = `${newValue}s`;
+                                          setScenesData(updated);
+                                      }}
+                                    >
+                                        <Minus className="w-3 h-3" />
+                                    </Button>
+                                      <Input
+                                        type="text"
+                                        value={scene.duration || "5s"}
+                                        onChange={(e) => {
+                                          const updated = [...scenesData];
+                                          updated[index].duration = e.target.value;
+                                          setScenesData(updated);
+                                  }}
+                                        className="h-5 w-10 text-xs text-center border-0 p-0 bg-transparent focus-visible:ring-0"
+                                        placeholder="5s"
+                                      />
+                        <Button
+                                        type="button"
+                                        variant="ghost"
+                      size="icon"
+                                        className="h-5 w-5 hover:bg-secondary"
+                                        onClick={() => {
+                                          const currentDuration = scene.duration || "5s";
+                                          const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
+                                          const newValue = numericValue + 1;
+                                          const updated = [...scenesData];
+                                          updated[index].duration = `${newValue}s`;
+                                          setScenesData(updated);
+                                        }}
                     >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add Scene
+                                        <Plus className="w-3 h-3" />
                     </Button>
                   </div>
-                </TabsContent>
-              </Tabs>
+                </div>
+                                </div>
+                            <Textarea
+                              value={scene.caption}
+                              onChange={(e) => {
+                                const updated = [...scenesData];
+                                updated[index].caption = e.target.value;
+                                // If "Same as Caption" mode is enabled, sync voiceover
+                                const mode = updated[index].voiceoverMode || (updated[index].sameAsCaption ? 'sameAsCaption' : 'custom');
+                                if (mode === 'sameAsCaption') {
+                                  updated[index].voiceover = e.target.value;
+                                }
+                                setScenesData(updated);
+                              }}
+                                  className="min-h-[32px] text-sm w-full"
+                              placeholder="Enter caption text..."
+                            />
+                          </div>
+
+                          {/* Voiceover Section */}
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <Label className="text-xs font-semibold shrink-0">Voiceover</Label>
+                              <div className="flex-1 flex justify-end">
+                                <Select
+                                  value={voiceoverMode}
+                                  onValueChange={(value: 'noCaption' | 'custom' | 'sameAsCaption') => {
+                                    const updated = [...scenesData];
+                                    updated[index].voiceoverMode = value;
+                                    updated[index].sameAsCaption = value === 'sameAsCaption';
+                                    if (value === 'sameAsCaption') {
+                                      updated[index].voiceover = updated[index].caption;
+                                    } else if (value === 'noCaption') {
+                                      updated[index].voiceover = '';
+                                    }
+                                    setScenesData(updated);
+                                  }}
+                                >
+                                  <SelectTrigger className="w-[140px] h-6 text-xs shrink-0 py-0 px-2 rounded-none">
+                                    <SelectValue placeholder="Select voiceover option" />
+                                  </SelectTrigger>
+                                  <SelectContent className="rounded-none">
+                                        <SelectItem value="noCaption" className="text-xs rounded-none">No Voiceover</SelectItem>
+                                    <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
+                                    <SelectItem value="sameAsCaption" className="text-xs rounded-none">Same as Caption</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            {(voiceoverMode === 'custom' || voiceoverMode === 'sameAsCaption') && (
+                              <Textarea
+                                value={scene.voiceover || ""}
+                                onChange={(e) => {
+                                  const updated = [...scenesData];
+                                  const mode = updated[index].voiceoverMode || (updated[index].sameAsCaption ? 'sameAsCaption' : 'custom');
+                                  if (mode === 'custom') {
+                                    updated[index].voiceover = e.target.value;
+                                    setScenesData(updated);
+                                  }
+                                }}
+                                className="min-h-[36px] text-xs w-full"
+                                placeholder={voiceoverMode === 'sameAsCaption' ? "Same as caption (synced automatically)" : "Enter voiceover text..."}
+                                disabled={voiceoverMode === 'sameAsCaption'}
+                              />
+                            )}
+                              </div>
+                          </div>
+
+                        {/* Drag Handle - Right Side (outside the input box) */}
+                        <div className="flex-shrink-0 flex items-center self-center">
+                          <div
+                            {...attributes}
+                            {...listeners}
+                            data-drag-handle
+                            className="p-2 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background cursor-grab active:cursor-grabbing"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <GripVertical className="w-4 h-4 text-muted-foreground" />
+                          </div>
+                        </div>
+                        </div>
+                            )}
+                          </SortableSceneRow>
+                      );
+                    })}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+                  </div>
+              </div>
             </div>
           );
 
@@ -2697,10 +3631,7 @@ export function VideoCreationForm({
             <div className="flex items-center">
               {steps
                 .filter((step, index) => {
-                  // Filter steps based on format
-                  if (formData.format === "9:16" && step.key === "horizontalPreview") {
-                    return false; // Hide horizontal preview for 9:16 format
-                  }
+                  // No longer filtering out preview step for 9:16 - it now supports vertical preview
                   return true;
                 })
                 .map((step, filteredIndex, filteredSteps) => {
@@ -2750,26 +3681,20 @@ export function VideoCreationForm({
                   </div>
 
           {/* Modal Content */}
-          <div className={`flex-1 min-h-0 ${currentStep === 4 ? 'overflow-hidden px-0 py-0' : currentStep === 3 ? 'overflow-hidden px-6 py-2' : 'overflow-y-auto px-6 py-2'}`}>
-            <div className={`${currentStep === 3 ? 'h-full min-h-0' : 'h-full min-h-0 overflow-hidden'}`}>{renderStepContent()}</div>
+          <div className={`flex-1 min-h-0 ${currentStep === 4 ? 'overflow-hidden px-0 py-0' : currentStep === 3 ? 'overflow-hidden px-6 py-0' : 'overflow-y-auto px-6 py-2'}`}>
+            <div className={`${currentStep === 3 ? 'h-full min-h-0 overflow-hidden' : currentStep === 1 || currentStep === 2 ? '' : 'h-full min-h-0 overflow-hidden'}`}>{renderStepContent()}</div>
               </div>
 
           <DialogFooter className="flex justify-between items-center px-6 py-4 border-t border-border">
             <div className="flex items-center gap-6">
-              {currentStep === 3 && (
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span>
-                    <span className="font-medium text-foreground">Total Scenes:</span> {scenesData.length}
-                  </span>
-                    <span>
-                    <span className="font-medium text-foreground">Video Duration:</span> {scenesData.length * 5}s
-                  </span>
-                </div>
-              )}
-              {/* AI Voice - Only shown in 4th tab (Horizontal Preview) */}
-              {currentStep === 3 && (
+              {/* AI Voice - Only shown in 4th tab (Horizontal Preview) and if voiceover is enabled */}
+              {currentStep === 3 && scenesData.some(scene => {
+                // Only show if voiceoverMode is explicitly set to 'custom' or 'sameAsCaption'
+                // If voiceoverMode is 'noCaption' or undefined, don't show
+                return scene.voiceoverMode === 'custom' || scene.voiceoverMode === 'sameAsCaption';
+              }) && (
                 <div className="flex items-center gap-2">
-                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">AI Voice</Label>
+                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">AI Voice</Label>
                   <Select
                     value={selectedAiVoice}
                     onValueChange={(value) => {
@@ -2782,7 +3707,7 @@ export function VideoCreationForm({
                       }
                     }}
                   >
-                    <SelectTrigger className="w-[200px] h-9">
+                    <SelectTrigger className="w-[200px] h-9 text-xs">
                       <SelectValue>
                         {aiVoices.find(v => v.id === selectedAiVoice)?.name || "Select AI Voice"}
                       </SelectValue>
@@ -2847,6 +3772,56 @@ export function VideoCreationForm({
                   />
                 </div>
               )}
+              {/* Voiceover Volume - Only shown if voiceover is enabled (not "No Voiceover") */}
+              {currentStep === 3 && scenesData.some(scene => {
+                // Only show if voiceoverMode is explicitly set to 'custom' or 'sameAsCaption'
+                // If voiceoverMode is 'noCaption' or undefined, don't show
+                return scene.voiceoverMode === 'custom' || scene.voiceoverMode === 'sameAsCaption';
+              }) && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">VO Volume</Label>
+                  <Select
+                    value={formData.voiceoverVolumeType}
+                    onValueChange={(value: "default" | "adaptive" | "custom") => {
+                      setFormData({ ...formData, voiceoverVolumeType: value });
+                    }}
+                  >
+                    <SelectTrigger className="w-[160px] h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Default</SelectItem>
+                      <SelectItem value="adaptive">Adaptive Volume</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {formData.voiceoverVolumeType === "custom" && (
+                    <div className="flex items-center gap-2">
+                      <Slider
+                        value={[formData.voiceoverVolume]}
+                        onValueChange={(value) => {
+                          setFormData({ ...formData, voiceoverVolume: value[0] });
+                        }}
+                        min={0}
+                        max={100}
+                        step={1}
+                        className="w-24"
+                      />
+                      <span className="text-[10px] text-muted-foreground w-10">{formData.voiceoverVolume}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {currentStep === 3 && (
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span>
+                    <span className="font-medium text-foreground">Total Scenes:</span> {scenesData.length}
+                  </span>
+                    <span>
+                    <span className="font-medium text-foreground">Video Duration:</span> {scenesData.length * 5}s
+                  </span>
+                </div>
+              )}
               <Button variant="outline" onClick={handleBack}>
                 {currentStep === 0 ? "Cancel" : "Back"}
               </Button>
@@ -2858,13 +3833,13 @@ export function VideoCreationForm({
                     setIsOpen(false);
                     onPreview();
                   }}>
-                    Quick Edit
+                    Save as Draft
                   </Button>
                   <Button variant="outline" onClick={() => {
                     setIsOpen(false);
                     onAdvancedEdit();
                   }}>
-                    Advanced Edit
+                    Edit
                   </Button>
                 </>
               ) : (
@@ -2879,8 +3854,7 @@ export function VideoCreationForm({
                         : formData.format === "16:9"
                         ? !formData.selectedTheme16x9
                         : !formData.selectedTheme9x16
-                    )) ||
-                    (currentStep === 2 && !formData.backgroundMusic)
+                    ))
                   }
                 >
                   Next
@@ -2891,11 +3865,13 @@ export function VideoCreationForm({
         </DialogContent>
       </Dialog>
 
-      {/* Replace Video Dialog */}
+      {/* Replace Media Dialog */}
       <Dialog open={isReplaceVideoDialogOpen} onOpenChange={(open) => {
         setIsReplaceVideoDialogOpen(open);
         if (!open) {
           setReplaceVideoSceneIndex(null);
+          setIsAddingMedia(false);
+          setAddMediaSceneIndex(null);
           setReplaceVideoTab("upload");
           setReplaceVideoSearchQuery("");
           setSelectedVideoForTrim(null);
@@ -2911,16 +3887,16 @@ export function VideoCreationForm({
       }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Replace Video</DialogTitle>
+            <DialogTitle>{isAddingMedia ? "Add Media" : "Replace Media"}</DialogTitle>
             <DialogDescription>
-              Choose how you want to replace the video for this scene
+              {isAddingMedia ? "Choose how you want to add media to this scene" : "Choose how you want to replace the media for this scene"}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4">
             <Tabs value={replaceVideoTab} onValueChange={(v) => setReplaceVideoTab(v as "upload" | "slike")}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="upload">Upload</TabsTrigger>
-                <TabsTrigger value="slike">Slike</TabsTrigger>
+                <TabsTrigger value="slike">Videos and Images</TabsTrigger>
               </TabsList>
               
               <TabsContent value="upload" className="mt-4">
@@ -2934,17 +3910,64 @@ export function VideoCreationForm({
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file && replaceVideoSceneIndex !== null) {
+                            if (file.type.startsWith('video/')) {
+                              // For video files, open trim dialog
+                              const url = URL.createObjectURL(file);
+                              // Create a video element to get duration
+                              const video = document.createElement('video');
+                              video.preload = 'metadata';
+                              video.src = url;
+                              video.onloadedmetadata = () => {
+                                const duration = Math.floor(video.duration);
+                                const durationString = formatTime(duration);
+                                setSelectedVideoForTrim({
+                                  id: `uploaded-${Date.now()}`,
+                                  title: file.name,
+                                  thumbnail: url,
+                                  duration: durationString,
+                                  file: file,
+                                  url: url,
+                                });
+                                setVideoTrimStartTime("00:00");
+                                setVideoTrimEndTime(durationString);
+                                setVideoTrimCurrentTime(0);
+                                setIsVideoTrimPlaying(false);
+                                setIsReplaceVideoDialogOpen(false);
+                                setIsVideoTrimDialogOpen(true);
+                              };
+                            } else {
+                              // For image files
                             const url = URL.createObjectURL(file);
                             const updated = [...scenesData];
+                              if (isAddingMedia) {
+                                // Add to mediaItems array
+                                const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                                const newMediaItem: MediaItem = {
+                                  id: `media-${updated[replaceVideoSceneIndex].id}-${Date.now()}`,
+                                  url: url,
+                                  type: 'image',
+                                  thumbnail: url,
+                                };
+                                updated[replaceVideoSceneIndex] = {
+                                  ...updated[replaceVideoSceneIndex],
+                                  mediaItems: [...currentMediaItems, newMediaItem],
+                                  activeMediaIndex: currentMediaItems.length, // Set as active
+                                };
+                              } else {
+                                // Replace existing media
                             updated[replaceVideoSceneIndex] = {
                               ...updated[replaceVideoSceneIndex],
                               mediaUrl: url,
-                              mediaType: file.type.startsWith('video/') ? 'video' : 'image',
-                              thumbnail: file.type.startsWith('video/') ? updated[replaceVideoSceneIndex].thumbnail : url,
+                                  mediaType: 'image',
+                                  thumbnail: url,
                             };
+                              }
                             setScenesData(updated);
                             setIsReplaceVideoDialogOpen(false);
                             setReplaceVideoSceneIndex(null);
+                              setIsAddingMedia(false);
+                              setAddMediaSceneIndex(null);
+                            }
                           }
                         }}
                       />
@@ -2996,9 +4019,10 @@ export function VideoCreationForm({
                             setVideoTrimStartTime("00:00");
                             setVideoTrimCurrentTime(0);
                             setIsVideoTrimPlaying(false);
-                            // Close Replace Video dialog and open Trim dialog
+                            // Close Replace Media dialog and open Trim dialog
                             setIsReplaceVideoDialogOpen(false);
                             setIsVideoTrimDialogOpen(true);
+                            // Keep isAddingMedia state so it's available in trim dialog
                           }}
                         >
                           <div className="aspect-video relative">
@@ -3039,23 +4063,18 @@ export function VideoCreationForm({
           setVideoTrimCurrentTime(0);
           setIsVideoTrimPlaying(false);
           setIsVideoTrimMuted(true);
+          setVideoTrimVolume(100);
+          setIsAddingMedia(false);
+          setAddMediaSceneIndex(null);
           if (videoTrimRef.current) {
             videoTrimRef.current.pause();
             videoTrimRef.current.currentTime = 0;
             videoTrimRef.current.muted = true;
+            videoTrimRef.current.volume = 1;
           }
         }
       }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Set In/Out Points</DialogTitle>
-            {selectedVideoForTrim && (
-              <DialogDescription>
-                {selectedVideoForTrim.title}
-              </DialogDescription>
-            )}
-          </DialogHeader>
-          
           {selectedVideoForTrim && (
             <div className="mt-4 space-y-4">
               {/* Video Player */}
@@ -3066,9 +4085,29 @@ export function VideoCreationForm({
               >
                 <video
                   ref={videoTrimRef}
-                  src={selectedVideoForTrim.thumbnail}
+                  src={selectedVideoForTrim.url || selectedVideoForTrim.thumbnail}
                   className="w-full aspect-video"
                   muted={isVideoTrimMuted}
+                  onLoadedMetadata={(e) => {
+                    const video = e.currentTarget;
+                    video.volume = isVideoTrimMuted ? 0 : videoTrimVolume / 100;
+                    if (video.duration && video.duration > 0) {
+                      const durationString = formatTime(Math.floor(video.duration));
+                      setVideoTrimEndTime(durationString);
+                      // Update selectedVideoForTrim with actual duration
+                      if (selectedVideoForTrim) {
+                        setSelectedVideoForTrim({
+                          ...selectedVideoForTrim,
+                          duration: durationString,
+                        });
+                      }
+                    } else {
+                      // If video metadata not available, use the duration from the video object
+                      const durationParts = selectedVideoForTrim.duration.split(":");
+                      const durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                      setVideoTrimEndTime(selectedVideoForTrim.duration);
+                    }
+                  }}
                   onTimeUpdate={(e) => {
                     const video = e.currentTarget;
                     const currentSeconds = Math.floor(video.currentTime);
@@ -3079,17 +4118,6 @@ export function VideoCreationForm({
                       video.pause();
                       setIsVideoTrimPlaying(false);
                       video.currentTime = endSeconds;
-                    }
-                  }}
-                  onLoadedMetadata={(e) => {
-                    const video = e.currentTarget;
-                    const durationParts = selectedVideoForTrim.duration.split(":");
-                    const durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-                    if (video.duration && video.duration > 0) {
-                      setVideoTrimEndTime(formatTime(Math.min(durationSeconds, Math.floor(video.duration))));
-                    } else {
-                      // If video metadata not available, use the duration from the video object
-                      setVideoTrimEndTime(selectedVideoForTrim.duration);
                     }
                   }}
                 />
@@ -3215,10 +4243,10 @@ export function VideoCreationForm({
                 )}
               </div>
               
-              {/* Timeline Bar with Green Markers */}
-              <div className="relative flex items-center gap-2">
+              {/* Timeline Bar - Red background with Yellow selected segment */}
+              <div className="relative">
                 <div 
-                  className="relative flex-1 h-12 rounded-lg overflow-hidden cursor-pointer bg-gray-200"
+                  className="relative h-3 rounded-full overflow-visible cursor-pointer bg-red-500"
                   onClick={(e) => {
                     if (videoTrimRef.current) {
                       const rect = e.currentTarget.getBoundingClientRect();
@@ -3232,22 +4260,9 @@ export function VideoCreationForm({
                     }
                   }}
                 >
-                  {/* Pre-slate area (left of selected segment) */}
+                  {/* Yellow selected segment (between start and end) */}
                   <div 
-                    className="absolute left-0 top-0 bottom-0 bg-gray-300"
-                    style={{
-                      width: `${(() => {
-                        const durationParts = selectedVideoForTrim.duration.split(":");
-                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-                        const startSeconds = parseTime(videoTrimStartTime);
-                        return maxDuration > 0 ? (startSeconds / maxDuration) * 100 : 0;
-                      })()}%`
-                    }}
-                  />
-                  
-                  {/* Selected segment (between start and end) - dark gray */}
-                  <div 
-                    className="absolute top-0 bottom-0 bg-gray-600"
+                    className="absolute top-0 bottom-0 bg-yellow-400"
                     style={{
                       left: `${(() => {
                         const durationParts = selectedVideoForTrim.duration.split(":");
@@ -3265,22 +4280,9 @@ export function VideoCreationForm({
                     }}
                   />
                   
-                  {/* Post-slate area (right of selected segment) */}
+                  {/* Start marker (In point - white downward arrow) */}
                   <div 
-                    className="absolute right-0 top-0 bottom-0 bg-gray-300"
-                    style={{
-                      width: `${(() => {
-                        const durationParts = selectedVideoForTrim.duration.split(":");
-                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-                        const endSeconds = parseTime(videoTrimEndTime);
-                        return maxDuration > 0 ? ((maxDuration - endSeconds) / maxDuration) * 100 : 0;
-                      })()}%`
-                    }}
-                  />
-                  
-                  {/* Start marker (green arrow) */}
-                  <div 
-                    className="absolute top-0 -translate-x-1/2 z-10 cursor-ew-resize"
+                    className="absolute -top-3 -translate-x-1/2 z-10 cursor-ew-resize"
                     style={{
                       left: `${(() => {
                         const durationParts = selectedVideoForTrim.duration.split(":");
@@ -3291,6 +4293,7 @@ export function VideoCreationForm({
                     }}
                     onMouseDown={(e) => {
                       e.stopPropagation();
+                      setIsDraggingVideoTrimStart(true);
                       const startX = e.clientX;
                       const durationParts = selectedVideoForTrim.duration.split(":");
                       const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
@@ -3303,17 +4306,21 @@ export function VideoCreationForm({
                           const deltaX = moveEvent.clientX - startX;
                           const deltaPercent = (deltaX / rect.width) * 100;
                           const newPercent = Math.max(0, Math.min(100, initialLeft + deltaPercent));
-                          const newSeconds = Math.floor((newPercent / 100) * maxDuration);
+                          const newSeconds = Math.max(0, Math.min(maxDuration, Math.floor((newPercent / 100) * maxDuration)));
+                          const endSeconds = parseTime(videoTrimEndTime);
+                          if (newSeconds < endSeconds) {
                           const newTime = formatTime(newSeconds);
                           setVideoTrimStartTime(newTime);
                           if (videoTrimRef.current) {
                             videoTrimRef.current.currentTime = newSeconds;
                             setVideoTrimCurrentTime(newSeconds);
+                            }
                           }
                         }
                       };
                       
                       const handleMouseUp = () => {
+                        setIsDraggingVideoTrimStart(false);
                         document.removeEventListener('mousemove', handleMouseMove);
                         document.removeEventListener('mouseup', handleMouseUp);
                       };
@@ -3322,12 +4329,13 @@ export function VideoCreationForm({
                       document.addEventListener('mouseup', handleMouseUp);
                     }}
                   >
-                    <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[8px] border-b-green-500" />
+                    {/* White downward-pointing arrow */}
+                    <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white" />
                   </div>
                   
-                  {/* End marker (green arrow) */}
+                  {/* End marker (Out point - white downward arrow, same as In) */}
                   <div 
-                    className="absolute top-0 -translate-x-1/2 z-10 cursor-ew-resize"
+                    className="absolute -top-3 -translate-x-1/2 z-10 cursor-ew-resize"
                     style={{
                       left: `${(() => {
                         const durationParts = selectedVideoForTrim.duration.split(":");
@@ -3338,6 +4346,7 @@ export function VideoCreationForm({
                     }}
                     onMouseDown={(e) => {
                       e.stopPropagation();
+                      setIsDraggingVideoTrimEnd(true);
                       const startX = e.clientX;
                       const durationParts = selectedVideoForTrim.duration.split(":");
                       const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
@@ -3350,17 +4359,21 @@ export function VideoCreationForm({
                           const deltaX = moveEvent.clientX - startX;
                           const deltaPercent = (deltaX / rect.width) * 100;
                           const newPercent = Math.max(0, Math.min(100, initialLeft + deltaPercent));
-                          const newSeconds = Math.floor((newPercent / 100) * maxDuration);
+                          const newSeconds = Math.max(0, Math.min(maxDuration, Math.floor((newPercent / 100) * maxDuration)));
+                          const startSeconds = parseTime(videoTrimStartTime);
+                          if (newSeconds > startSeconds) {
                           const newTime = formatTime(newSeconds);
                           setVideoTrimEndTime(newTime);
                           if (videoTrimRef.current) {
                             videoTrimRef.current.currentTime = newSeconds;
                             setVideoTrimCurrentTime(newSeconds);
+                            }
                           }
                         }
                       };
                       
                       const handleMouseUp = () => {
+                        setIsDraggingVideoTrimEnd(false);
                         document.removeEventListener('mousemove', handleMouseMove);
                         document.removeEventListener('mouseup', handleMouseUp);
                       };
@@ -3369,10 +4382,11 @@ export function VideoCreationForm({
                       document.addEventListener('mouseup', handleMouseUp);
                     }}
                   >
-                    <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[8px] border-b-green-500" />
+                    {/* White downward-pointing arrow (same as In marker) */}
+                    <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white" />
                   </div>
                   
-                  {/* Red circular playhead at current position with green vertical line */}
+                  {/* Current playhead position (white vertical line with circle) */}
                   <div 
                     className="absolute top-0 -translate-x-1/2 z-20"
                     style={{
@@ -3383,28 +4397,20 @@ export function VideoCreationForm({
                       })()}%`
                     }}
                   >
-                    {/* Green vertical line extending upward */}
-                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0.5 h-4 bg-green-500" />
-                    {/* Red circle */}
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-md" />
+                    {/* White circle */}
+                    <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-2 h-2 bg-white rounded-full border border-gray-300" />
+                    {/* White vertical line */}
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-full bg-white" />
                   </div>
                 </div>
-                
-                {/* Add Button */}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-12 w-12 rounded-md bg-blue-500 hover:bg-blue-600 border-blue-600"
-                >
-                  <Plus className="w-5 h-5 text-white" />
-                </Button>
               </div>
               
-              {/* Time Controls */}
-              <div className="flex items-end gap-4">
-                {/* Start Time */}
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs font-medium text-muted-foreground">Start</Label>
+              {/* Controls Row */}
+              <div className="flex items-center gap-4">
+                {/* Left: Start/End Time Inputs */}
+                <div className="flex items-center gap-4">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase">START</Label>
                   <Input
                     type="text"
                     value={videoTrimStartTime}
@@ -3421,9 +4427,8 @@ export function VideoCreationForm({
                   />
                 </div>
                 
-                {/* End Time */}
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs font-medium text-muted-foreground">End</Label>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase">END</Label>
                   <Input
                     type="text"
                     value={videoTrimEndTime}
@@ -3438,11 +4443,12 @@ export function VideoCreationForm({
                     className="w-20 h-9 text-center text-sm font-semibold bg-white border-border rounded-md"
                     placeholder="00:00"
                   />
+                  </div>
                 </div>
                 
-                {/* Playback Controls */}
-                <div className="flex items-center gap-1">
-                  {/* Skip Backward (two lines + left triangle) */}
+                {/* Center: Playback Controls */}
+                <div className="flex items-center gap-1 flex-1 justify-center">
+                  {/* Fast Backward (two lines + left triangle) */}
                   <Button
                     variant="outline"
                     size="icon"
@@ -3454,7 +4460,7 @@ export function VideoCreationForm({
                         setVideoTrimStartTime("00:00");
                       }
                     }}
-                    title="Skip to start"
+                    title="Fast backward"
                   >
                     <div className="flex items-center gap-0.5">
                       <div className="w-0.5 h-3 bg-white rounded" />
@@ -3463,7 +4469,7 @@ export function VideoCreationForm({
                     </div>
                   </Button>
                   
-                  {/* Rewind (one line + left triangle) */}
+                  {/* Skip Backward (one line + left triangle) */}
                   <Button
                     variant="outline"
                     size="icon"
@@ -3473,7 +4479,6 @@ export function VideoCreationForm({
                         const newTime = Math.max(0, videoTrimCurrentTime - 1);
                         videoTrimRef.current.currentTime = newTime;
                         setVideoTrimCurrentTime(newTime);
-                        setVideoTrimStartTime(formatTime(newTime));
                       }
                     }}
                     title="1 second backward"
@@ -3482,6 +4487,23 @@ export function VideoCreationForm({
                       <div className="w-0.5 h-3 bg-white rounded" />
                       <ChevronLeft className="w-3 h-3 text-white" />
                     </div>
+                  </Button>
+                  
+                  {/* Frame Backward */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        const newTime = Math.max(0, videoTrimCurrentTime - 0.1);
+                        videoTrimRef.current.currentTime = newTime;
+                        setVideoTrimCurrentTime(Math.floor(newTime));
+                      }
+                    }}
+                    title="Frame backward"
+                  >
+                    <ChevronLeft className="w-3 h-3 text-white" />
                   </Button>
                   
                   {/* Play/Pause */}
@@ -3510,7 +4532,26 @@ export function VideoCreationForm({
                     )}
                   </Button>
                   
-                  {/* Fast Forward (right triangle + one line) */}
+                  {/* Frame Forward */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      if (videoTrimRef.current) {
+                        const durationParts = selectedVideoForTrim.duration.split(":");
+                        const maxDuration = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+                        const newTime = Math.min(maxDuration, videoTrimCurrentTime + 0.1);
+                        videoTrimRef.current.currentTime = newTime;
+                        setVideoTrimCurrentTime(Math.floor(newTime));
+                      }
+                    }}
+                    title="Frame forward"
+                  >
+                    <ChevronRight className="w-3 h-3 text-white" />
+                  </Button>
+                  
+                  {/* Skip Forward (right triangle + one line) */}
                   <Button
                     variant="outline"
                     size="icon"
@@ -3522,7 +4563,6 @@ export function VideoCreationForm({
                         const newTime = Math.min(maxDuration, videoTrimCurrentTime + 1);
                         videoTrimRef.current.currentTime = newTime;
                         setVideoTrimCurrentTime(newTime);
-                        setVideoTrimEndTime(formatTime(newTime));
                       }
                     }}
                     title="1 second forward"
@@ -3533,7 +4573,7 @@ export function VideoCreationForm({
                     </div>
                   </Button>
                   
-                  {/* Skip Forward (right triangle + two lines) */}
+                  {/* Fast Forward (right triangle + two lines) */}
                   <Button
                     variant="outline"
                     size="icon"
@@ -3547,7 +4587,7 @@ export function VideoCreationForm({
                         setVideoTrimEndTime(selectedVideoForTrim.duration);
                       }
                     }}
-                    title="Skip to end"
+                    title="Fast forward"
                   >
                     <div className="flex items-center gap-0.5">
                       <ChevronRight className="w-3 h-3 text-white" />
@@ -3557,42 +4597,99 @@ export function VideoCreationForm({
                   </Button>
                 </div>
                 
-                {/* Mute Button */}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9 rounded-md bg-gray-100 hover:bg-gray-200 border-gray-300"
-                  onClick={() => {
-                    if (videoTrimRef.current) {
-                      videoTrimRef.current.muted = !isVideoTrimMuted;
-                      setIsVideoTrimMuted(!isVideoTrimMuted);
-                    }
-                  }}
-                  title={isVideoTrimMuted ? "Unmute" : "Mute"}
-                >
-                  {isVideoTrimMuted ? (
-                    <VolumeX className="w-4 h-4 text-gray-700" />
-                  ) : (
-                    <Volume2 className="w-4 h-4 text-gray-700" />
+                {/* Audio Controls: Mute/Unmute and Volume Slider */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-md bg-gray-700 hover:bg-gray-600 border-gray-600"
+                    onClick={() => {
+                      const newMutedState = !isVideoTrimMuted;
+                      setIsVideoTrimMuted(newMutedState);
+                      if (videoTrimRef.current) {
+                        videoTrimRef.current.muted = newMutedState;
+                        if (!newMutedState) {
+                          videoTrimRef.current.volume = videoTrimVolume / 100;
+                        }
+                      }
+                    }}
+                    title={isVideoTrimMuted ? "Unmute" : "Mute"}
+                  >
+                    {isVideoTrimMuted ? (
+                      <VolumeX className="w-4 h-4 text-white" />
+                    ) : (
+                      <Volume2 className="w-4 h-4 text-white" />
+                    )}
+                  </Button>
+                  {!isVideoTrimMuted && (
+                    <div className="flex items-center gap-2 w-32">
+                      <Slider
+                        value={[videoTrimVolume]}
+                        onValueChange={(value) => {
+                          const newVolume = value[0];
+                          setVideoTrimVolume(newVolume);
+                          if (videoTrimRef.current) {
+                            videoTrimRef.current.volume = newVolume / 100;
+                            videoTrimRef.current.muted = false;
+                          }
+                        }}
+                        min={0}
+                        max={100}
+                        step={1}
+                        className="flex-1"
+                      />
+                      <span className="text-xs text-white w-10 text-right">{videoTrimVolume}%</span>
+                    </div>
                   )}
-                </Button>
+                </div>
                 
-                <div className="flex-1" />
-                
-                {/* Apply Button */}
+                {/* Right: Clip Duration and Add Button */}
+                <div className="flex items-center gap-4">
+                  <div className="flex flex-col items-end">
+                    <span className="text-xs text-muted-foreground uppercase">CLIP DURATION</span>
+                    <span className="text-sm font-semibold">
+                      {(() => {
+                        const startSeconds = parseTime(videoTrimStartTime);
+                        const endSeconds = parseTime(videoTrimEndTime);
+                        const clipDuration = Math.max(0, endSeconds - startSeconds);
+                        return formatTime(clipDuration);
+                      })()}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground mt-0.5">{selectedVideoForTrim.duration}</span>
+                  </div>
                 <Button
                   onClick={() => {
                     if (replaceVideoSceneIndex !== null && selectedVideoForTrim) {
+                        const videoUrl = selectedVideoForTrim.url || selectedVideoForTrim.thumbnail;
                       const updated = [...scenesData];
+                        if (isAddingMedia) {
+                          // Add to mediaItems array
+                          const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                          const newMediaItem: MediaItem = {
+                            id: `media-${updated[replaceVideoSceneIndex].id}-${Date.now()}`,
+                            url: videoUrl,
+                            type: 'video',
+                            thumbnail: selectedVideoForTrim.thumbnail,
+                          };
                       updated[replaceVideoSceneIndex] = {
                         ...updated[replaceVideoSceneIndex],
-                        mediaUrl: selectedVideoForTrim.thumbnail,
+                            mediaItems: [...currentMediaItems, newMediaItem],
+                            activeMediaIndex: currentMediaItems.length, // Set as active
+                          };
+                        } else {
+                          // Replace existing media
+                          updated[replaceVideoSceneIndex] = {
+                            ...updated[replaceVideoSceneIndex],
+                            mediaUrl: videoUrl,
                         mediaType: 'video',
                         thumbnail: selectedVideoForTrim.thumbnail,
                       };
+                        }
                       setScenesData(updated);
                       setIsVideoTrimDialogOpen(false);
                       setReplaceVideoSceneIndex(null);
+                        setIsAddingMedia(false);
+                        setAddMediaSceneIndex(null);
                       setSelectedVideoForTrim(null);
                       setVideoTrimStartTime("00:00");
                       setVideoTrimEndTime("00:00");
@@ -3604,10 +4701,11 @@ export function VideoCreationForm({
                       }
                     }
                   }}
-                  className="h-9"
+                    className="h-9 bg-primary hover:bg-primary/90 px-4"
                 >
-                  Apply
+                    ADD
                 </Button>
+                </div>
               </div>
             </div>
           )}
