@@ -227,6 +227,8 @@ type MediaItem = {
   url: string;
   type: 'image' | 'video';
   thumbnail?: string;
+  duration?: string; // Duration for images (e.g., "5s"), video duration is stored separately
+  videoDuration?: string; // Actual video duration (e.g., "00:15")
 };
 
 type SceneType = {
@@ -556,8 +558,8 @@ function UnifiedSceneCard({
                 </SelectTrigger>
                 <SelectContent className="rounded-none">
                   <SelectItem value="noCaption" className="text-xs rounded-none">No Voiceover</SelectItem>
-                  <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
                   <SelectItem value="sameAsCaption" className="text-xs rounded-none">Same as Caption</SelectItem>
+                  <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -711,6 +713,8 @@ interface SortableMediaItemProps {
   onDelete: () => void;
   canDelete?: boolean; // Allow deletion if there's more than one item
   onReplace?: () => void; // Optional replace functionality
+  onDurationChange?: (duration: string) => void; // Callback for duration changes
+  sceneIndex?: number; // Scene index for updating duration
 }
 
 function SortableMediaItem({
@@ -721,6 +725,8 @@ function SortableMediaItem({
   onDelete,
   canDelete = true,
   onReplace,
+  onDurationChange,
+  sceneIndex,
 }: SortableMediaItemProps) {
   const {
     attributes,
@@ -735,6 +741,13 @@ function SortableMediaItem({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+  };
+
+  const handleDurationChange = (delta: number) => {
+    if (!onDurationChange || mediaItem.type !== 'image') return;
+    const currentDuration = parseInt(mediaItem.duration?.replace('s', '') || '5') || 5;
+    const newDuration = Math.max(1, currentDuration + delta);
+    onDurationChange(`${newDuration}s`);
   };
 
   return (
@@ -768,7 +781,7 @@ function SortableMediaItem({
         )}
       </div>
       {/* 3-dots menu for media options - always visible */}
-      <div className="absolute top-1 right-1 z-10">
+      <div className="absolute top-0.5 right-0.5 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -776,7 +789,7 @@ function SortableMediaItem({
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <MoreVertical className="w-3 h-3 text-muted-foreground" />
+              <MoreVertical className="w-2.5 h-2.5 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
@@ -807,14 +820,84 @@ function SortableMediaItem({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      
+      {/* Video duration display or Image duration controls */}
+      {mediaItem.type === 'video' ? (
+        mediaItem.videoDuration && (
+          <div className="absolute bottom-0.5 left-0.5 px-1 py-0.5 rounded bg-black/80 backdrop-blur-sm">
+            <span className="text-[10px] text-white font-medium">{mediaItem.videoDuration}</span>
+          </div>
+        )
+      ) : (
+        <div 
+          className="absolute bottom-0.5 left-0.5 right-0.5 flex items-center justify-between gap-1 px-1 py-0.5 rounded bg-black/80 backdrop-blur-sm"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-3 w-3 p-0 hover:bg-white/20"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDurationChange(-1);
+            }}
+          >
+            <Minus className="w-2 h-2 text-white" />
+          </Button>
+          <span className="text-[10px] text-white font-medium min-w-[20px] text-center">
+            {mediaItem.duration || '5s'}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-3 w-3 p-0 hover:bg-white/20"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDurationChange(1);
+            }}
+          >
+            <Plus className="w-2 h-2 text-white" />
+          </Button>
+        </div>
+      )}
+      
+      {/* Video icon indicator */}
       {mediaItem.type === 'video' && (
-        <div className="absolute bottom-1 left-1 p-0.5 rounded bg-black/60 backdrop-blur-sm">
-          <Video className="w-2.5 h-2.5 text-white" />
+        <div className="absolute top-0.5 left-0.5 p-0.5 rounded bg-black/60 backdrop-blur-sm">
+          <Video className="w-2 h-2 text-white" />
         </div>
       )}
     </div>
   );
 }
+
+// Helper function to calculate total duration from media items
+const calculateTotalDuration = (mediaItems: MediaItem[]): number => {
+  return mediaItems.reduce((sum, item) => {
+    if (item.type === 'video') {
+      // For videos, use videoDuration if available, otherwise try to parse duration
+      const videoDuration = item.videoDuration;
+      if (videoDuration) {
+        // videoDuration might be in format "MM:SS" or seconds number
+        if (typeof videoDuration === 'string') {
+          const parts = videoDuration.split(':');
+          if (parts.length === 2) {
+            return sum + parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          }
+          return sum + parseInt(videoDuration) || 0;
+        }
+        return sum + (videoDuration || 0);
+      }
+      // Fallback to duration property for videos
+      const duration = item.duration?.replace('s', '') || '0';
+      return sum + (parseInt(duration) || 0);
+    } else {
+      // For images, use duration property
+      const duration = item.duration?.replace('s', '') || '5';
+      return sum + (parseInt(duration) || 5);
+    }
+  }, 0);
+};
 
 export function VideoCreationForm({
   onBack,
@@ -899,12 +982,13 @@ export function VideoCreationForm({
   const [isDraggingVideoTrimStart, setIsDraggingVideoTrimStart] = useState(false);
   const [isDraggingVideoTrimEnd, setIsDraggingVideoTrimEnd] = useState(false);
   const videoTrimRef = useRef<HTMLVideoElement | null>(null);
+  const [playingThumbnails, setPlayingThumbnails] = useState<{ [key: number]: boolean }>({});
+  const thumbnailVideoRefs = useRef<{ [key: number]: HTMLVideoElement | null }>({});
   
   // Logo configuration state
   const [uploadedLogo, setUploadedLogo] = useState<string | null>(null);
   const [logoPlacement, setLogoPlacement] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right" | null>(null);
   const [logoToggle, setLogoToggle] = useState<"no-logo" | "upload-logo">("no-logo");
-  const [isLogoUploadDialogOpen, setIsLogoUploadDialogOpen] = useState(false);
   
   // Pre and Post Slates state
   const [preSlate, setPreSlate] = useState<string | null>(null);
@@ -1168,9 +1252,9 @@ export function VideoCreationForm({
     selectedTheme16x9: "",
     selectedTheme9x16: "",
     backgroundMusic: "",
-    backgroundMusicVolumeType: "default" as "default" | "adaptive" | "custom",
+    backgroundMusicVolumeType: "adaptive" as "adaptive" | "custom",
     backgroundMusicVolume: 50,
-    voiceoverVolumeType: "default" as "default" | "adaptive" | "custom",
+    voiceoverVolumeType: "adaptive" as "adaptive" | "custom",
     voiceoverVolume: 50,
   });
 
@@ -2560,8 +2644,8 @@ export function VideoCreationForm({
                         <Label className="text-xs font-medium w-24">Volume Level</Label>
                         <div className="flex items-center gap-2 flex-1">
                           <Select
-                            value={formData.backgroundMusicVolumeType || "default"}
-                            onValueChange={(value: "default" | "adaptive" | "custom") => {
+                            value={formData.backgroundMusicVolumeType || "adaptive"}
+                            onValueChange={(value: "adaptive" | "custom") => {
                               setFormData({ ...formData, backgroundMusicVolumeType: value });
                             }}
                           >
@@ -2569,7 +2653,6 @@ export function VideoCreationForm({
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="default">Default</SelectItem>
                               <SelectItem value="adaptive">Adaptive Volume</SelectItem>
                               <SelectItem value="custom">Custom</SelectItem>
                             </SelectContent>
@@ -2663,115 +2746,91 @@ export function VideoCreationForm({
             
             {/* Section 2: Logo Upload and Placement */}
             <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
-              {/* Section Header with Dropdown */}
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 rounded-lg bg-primary/10">
-                  <Upload className="w-5 h-5 text-primary" />
+              {/* Section Header with Preview */}
+              <div className="flex items-start justify-between gap-6 mb-6">
+                <div className="flex items-center gap-3 flex-1">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Upload className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <Label className="text-lg font-semibold">Logo</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">Upload and position your logo on the video</p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-lg font-semibold">Logo</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Upload and position your logo on the video</p>
-                    </div>
-                    {uploadedLogo && logoToggle === "upload-logo" ? (
-                      /* Logo Preview and Placement Dropdown in same row */
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <img src={uploadedLogo} alt="Logo" className="h-12 w-auto object-contain border border-border rounded" />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-background border border-border"
-                            onClick={() => {
-                              setUploadedLogo(null);
-                              setLogoToggle("no-logo");
-                              setLogoPlacement(null);
-                            }}
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </Button>
-                        </div>
-                        <Select
-                          value={logoPlacement || ""}
-                          onValueChange={(value: "top-left" | "top-right" | "bottom-left" | "bottom-right") => {
-                            setLogoPlacement(value);
+                
+                {/* Preview screen with logo */}
+                <div className="space-y-2">
+                  {/* Position Dropdown - Only show when logo is uploaded */}
+                  {uploadedLogo && (
+                    <Select
+                      value={logoPlacement || ""}
+                      onValueChange={(value: "top-left" | "top-right" | "bottom-left" | "bottom-right") => {
+                        setLogoPlacement(value);
+                      }}
+                    >
+                      <SelectTrigger className="h-7 text-xs w-32">
+                        <SelectValue placeholder="Position" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="top-left">Top Left</SelectItem>
+                        <SelectItem value="top-right">Top Right</SelectItem>
+                        <SelectItem value="bottom-left">Bottom Left</SelectItem>
+                        <SelectItem value="bottom-right">Bottom Right</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <div
+                    onClick={() => {
+                      if (!uploadedLogo) {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (file) {
+                            const url = URL.createObjectURL(file);
+                            setUploadedLogo(url);
+                            setLogoToggle("upload-logo");
+                            if (!logoPlacement) {
+                              setLogoPlacement("top-right");
+                            }
+                          }
+                        };
+                        input.click();
+                      }
+                    }}
+                    className="relative bg-black rounded-lg border border-border aspect-video w-32 flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 transition-colors"
+                  >
+                    {uploadedLogo && logoPlacement ? (
+                      <>
+                        <img
+                          src={uploadedLogo}
+                          alt="Logo preview"
+                          className={cn(
+                            "absolute max-h-[20%] max-w-[20%] object-contain",
+                            logoPlacement === "top-left" && "top-2 left-2",
+                            logoPlacement === "top-right" && "top-2 right-2",
+                            logoPlacement === "bottom-left" && "bottom-2 left-2",
+                            logoPlacement === "bottom-right" && "bottom-2 right-2"
+                          )}
+                        />
+                        <button
+                          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-xs font-medium text-white hover:text-white/80 transition-colors cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUploadedLogo(null);
+                            setLogoToggle("no-logo");
+                            setLogoPlacement(null);
                           }}
                         >
-                          <SelectTrigger className="w-[200px] h-8 text-xs">
-                            <SelectValue placeholder="Select logo placement" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="top-left">Top Left</SelectItem>
-                            <SelectItem value="top-right">Top Right</SelectItem>
-                            <SelectItem value="bottom-left">Bottom Left</SelectItem>
-                            <SelectItem value="bottom-right">Bottom Right</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                          Remove
+                        </button>
+                      </>
                     ) : (
-                      /* Upload Logo Toggle */
-                      <Select
-                        value={logoToggle}
-                        onValueChange={(value: "no-logo" | "upload-logo") => {
-                          setLogoToggle(value);
-                          if (value === "upload-logo" && !uploadedLogo) {
-                            setIsLogoUploadDialogOpen(true);
-                          } else if (value === "no-logo") {
-                            setUploadedLogo(null);
-                            setLogoPlacement(null);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="w-[180px] h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="no-logo">No logo</SelectItem>
-                          <SelectItem value="upload-logo">Upload Logo</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <span className="text-white/70 font-medium text-sm">No Logo</span>
                     )}
                   </div>
                 </div>
-              </div>
-
-              <div>
-                
-                {/* Logo Upload Dialog */}
-                <Dialog open={isLogoUploadDialogOpen} onOpenChange={setIsLogoUploadDialogOpen}>
-                  <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                      <DialogTitle>Upload Logo</DialogTitle>
-                      <DialogDescription>
-                        Select an image file to use as your logo.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-4 py-4">
-                      <Button
-                        variant="outline"
-                      onClick={() => {
-                          const input = document.createElement('input');
-                          input.type = 'file';
-                          input.accept = 'image/*';
-                          input.onchange = (e) => {
-                            const file = (e.target as HTMLInputElement).files?.[0];
-                            if (file) {
-                              const url = URL.createObjectURL(file);
-                              setUploadedLogo(url);
-                              setIsLogoUploadDialogOpen(false);
-                            }
-                          };
-                          input.click();
-                        }}
-                        className="gap-2"
-                      >
-                        <Upload className="w-4 h-4" />
-                        Choose File
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
               </div>
             </div>
             
@@ -2928,7 +2987,7 @@ export function VideoCreationForm({
         return (
           <div className="h-full flex flex-col">
             {/* Single scrollable container with unified rows */}
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-x-visible overflow-y-hidden">
                       <div 
                         ref={leftPanelScrollRef} 
                 className="h-full overflow-y-auto scrollbar-hide"
@@ -2957,11 +3016,14 @@ export function VideoCreationForm({
                               url: scene.mediaUrl,
                               type: (scene.mediaType || 'image') as 'image' | 'video',
                               thumbnail: scene.thumbnail,
+                              duration: scene.mediaType === 'image' ? '5s' : undefined,
+                              videoDuration: scene.mediaType === 'video' ? undefined : undefined,
                             }] : [{
                               id: `media-${scene.id}-0`,
                               url: scene.thumbnail || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
                               type: 'image' as const,
                               thumbnail: scene.thumbnail || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop",
+                              duration: '5s',
                             }]);
                         
                         // Get active media item
@@ -2982,11 +3044,17 @@ export function VideoCreationForm({
                             {activeMedia ? (
                               activeMedia.type === 'video' ? (
                         <video
+                                  ref={(el) => {
+                                    if (el) thumbnailVideoRefs.current[scene.id] = el;
+                                  }}
                                   src={activeMedia.url}
                           className="w-full h-full object-cover object-center"
                           style={{ objectFit: 'cover', objectPosition: 'center' }}
                           muted
                           playsInline
+                          loop
+                          onPlay={() => setPlayingThumbnails(prev => ({ ...prev, [scene.id]: true }))}
+                          onPause={() => setPlayingThumbnails(prev => ({ ...prev, [scene.id]: false }))}
                         />
                               ) : (
                                 <img
@@ -2996,6 +3064,20 @@ export function VideoCreationForm({
                                   style={{ objectFit: 'cover', objectPosition: 'center' }}
                                 />
                               )
+                      ) : scene.mediaType === 'video' ? (
+                        <video
+                          ref={(el) => {
+                            if (el) thumbnailVideoRefs.current[scene.id] = el;
+                          }}
+                          src={scene.mediaUrl || scene.thumbnail}
+                          className="w-full h-full object-cover object-center"
+                          style={{ objectFit: 'cover', objectPosition: 'center' }}
+                          muted
+                          playsInline
+                          loop
+                          onPlay={() => setPlayingThumbnails(prev => ({ ...prev, [scene.id]: true }))}
+                          onPause={() => setPlayingThumbnails(prev => ({ ...prev, [scene.id]: false }))}
+                        />
                       ) : (
                         <img
                           src={scene.thumbnail || scene.mediaUrl || "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=400&h=225&fit=crop"}
@@ -3006,31 +3088,43 @@ export function VideoCreationForm({
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
                       
-                      {/* Play button for videos */}
-                      {(() => {
-                        const activeMedia = mediaItems.length > 0 && activeMediaIndex !== undefined 
-                          ? mediaItems[activeMediaIndex] 
-                          : null;
-                        const isVideo = activeMedia?.type === 'video' || scene.mediaType === 'video';
-                        if (isVideo) {
-                          return (
-                            <div className="absolute inset-0 flex items-center justify-center z-10">
-                              <Button
-                                variant="secondary"
-                                size="icon"
-                                className="h-12 w-12 rounded-full bg-background/90 hover:bg-background backdrop-blur-sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  // TODO: Implement video playback
-                                }}
-                              >
-                                <Play className="w-6 h-6" />
-                              </Button>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
+                      {/* Play Button Overlay */}
+                      {((activeMedia && activeMedia.type === 'video') || scene.mediaType === 'video') && (
+                        <div 
+                          className="absolute inset-0 flex items-center justify-center bg-background/40 opacity-0 hover:opacity-100 transition-opacity z-30"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const videoRef = thumbnailVideoRefs.current[scene.id];
+                            if (videoRef) {
+                              if (playingThumbnails[scene.id]) {
+                                videoRef.pause();
+                                setPlayingThumbnails(prev => ({ ...prev, [scene.id]: false }));
+                              } else {
+                                videoRef.play();
+                                setPlayingThumbnails(prev => ({ ...prev, [scene.id]: true }));
+                              }
+                            }
+                          }}
+                        >
+                          {!playingThumbnails[scene.id] ? (
+                            <Button
+                              variant="secondary"
+                              size="icon"
+                              className="h-12 w-12 rounded-full bg-background/90 hover:bg-background"
+                            >
+                              <Play className="w-6 h-6" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="icon"
+                              className="h-12 w-12 rounded-full bg-background/90 hover:bg-background"
+                            >
+                              <Pause className="w-6 h-6" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
 
                             {/* Caption overlay - Read-only, follows template */}
                       {scene.caption && (() => {
@@ -3073,7 +3167,8 @@ export function VideoCreationForm({
                                     className="p-2 pb-4 rounded"
                                   style={{
                                     backgroundColor: bgColor === "transparent" ? "transparent" : bgColor,
-                                    marginBottom: '8px', // Extra margin to prevent cropping
+                                    minHeight: 'auto',
+                                    maxHeight: 'none',
                                   }}
                                 >
                                   <p
@@ -3083,8 +3178,10 @@ export function VideoCreationForm({
                                       fontSize: `${scene.captionFontSize || 16}px`,
                                       fontFamily: fontFamily,
                                         lineHeight: '1.5', // Better line spacing
-                                        marginBottom: '0', // Ensure no extra margin
-                                        paddingBottom: '4px', // Small padding to prevent text cutoff
+                                        marginBottom: '0',
+                                        paddingBottom: '4px', // Add padding to prevent cropping
+                                        wordWrap: 'break-word',
+                                        overflowWrap: 'break-word',
                                     }}
                                   >
                                     {scene.caption}
@@ -3115,28 +3212,29 @@ export function VideoCreationForm({
                         };
 
                       return (
-                          <SortableSceneRow key={scene.id} sceneId={scene.id}>
-                            {({ attributes, listeners, setNodeRef, style }) => (
-                              <div
-                                ref={(node) => {
-                                  setNodeRef(node);
-                                  if (node) {
-                                    sceneRefsMap.current.set(index, node);
-                                    sceneDetailsRefsMap.current.set(index, node);
-                                  } else {
-                                    sceneRefsMap.current.delete(index);
-                                    sceneDetailsRefsMap.current.delete(index);
-                                  }
-                                }}
-                                style={style}
-                                className={cn(
-                                  "flex gap-4 rounded-lg p-4 transition-all border",
-                                  isActiveScene 
-                                    ? "border-2 border-primary ring-2 ring-primary/30 shadow-md bg-primary/5" 
-                                    : "border-border",
-                                  index < scenesData.length - 1 && "mb-4 pb-4 border-b"
-                                )}
-                              >
+                          <div className="relative pr-12">
+                            <SortableSceneRow key={scene.id} sceneId={scene.id}>
+                              {({ attributes, listeners, setNodeRef, style }) => (
+                                <div
+                                  ref={(node) => {
+                                    setNodeRef(node);
+                                    if (node) {
+                                      sceneRefsMap.current.set(index, node);
+                                      sceneDetailsRefsMap.current.set(index, node);
+                                    } else {
+                                      sceneRefsMap.current.delete(index);
+                                      sceneDetailsRefsMap.current.delete(index);
+                                    }
+                                  }}
+                                  style={style}
+                                  className={cn(
+                                    "flex gap-4 rounded-lg p-4 transition-all border relative",
+                                    isActiveScene 
+                                      ? "border-2 border-primary ring-2 ring-primary/30 shadow-md bg-primary/5" 
+                                      : "border-border",
+                                    index < scenesData.length - 1 && "mb-4 pb-4 border-b"
+                                  )}
+                                >
                             {/* Left Side - Scene Preview */}
                             <div className={cn(
                               "flex-shrink-0 flex flex-col gap-3",
@@ -3171,182 +3269,40 @@ export function VideoCreationForm({
                                 </div>
                               </div>
                               
-                              {/* Media Items Thumbnails - Always show all media items */}
-                              {mediaItems.length > 0 && (
-                                <div className="w-full">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <Label className="text-xs font-semibold block text-muted-foreground">Media Items</Label>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 text-xs px-2"
-                                      onClick={() => {
-                                        setIsAddingMedia(true);
-                                        setAddMediaSceneIndex(index);
-                                        setReplaceVideoSceneIndex(index);
-                                        setReplaceVideoTab("upload");
-                                        setReplaceVideoSearchQuery("");
-                                        setIsReplaceVideoDialogOpen(true);
-                                      }}
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      Add
-                                    </Button>
+                              {/* Scene Duration - Below thumbnail */}
+                              <div className="w-full mt-3">
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-xs font-semibold text-muted-foreground shrink-0">Scene Duration</Label>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm font-medium text-muted-foreground min-w-[40px] text-center">
+                                      {`${calculateTotalDuration(mediaItems)}s`}
+                                    </span>
                                   </div>
-                                  {mediaItems.length > 1 ? (
-                          <SortableContext
-                                      items={mediaItems.map(item => item.id)}
-                            strategy={verticalListSortingStrategy}
-                          >
-                                      <div className="grid grid-cols-3 gap-2">
-                                        {mediaItems.map((mediaItem, mediaIndex) => (
-                                          <SortableMediaItem
-                                            key={mediaItem.id}
-                                            mediaItem={mediaItem}
-                                            index={mediaIndex}
-                                            isActive={mediaIndex === activeMediaIndex}
-                                            canDelete={mediaItems.length > 1}
-                                            onSelect={() => {
-                                              const updated = [...scenesData];
-                                              updated[index] = {
-                                                ...updated[index],
-                                                activeMediaIndex: mediaIndex,
-                                                mediaItems: updated[index].mediaItems || mediaItems,
-                                              };
-                                              setScenesData(updated);
-                                            }}
-                                            onDelete={() => {
-                                              const updated = [...scenesData];
-                                              const currentMediaItems = updated[index].mediaItems || mediaItems;
-                                              const newMediaItems = currentMediaItems.filter((_, i) => i !== mediaIndex);
-                                              
-                                              // Update activeMediaIndex if needed
-                                              let newActiveIndex = updated[index].activeMediaIndex ?? 0;
-                                              if (mediaIndex === newActiveIndex) {
-                                                // If deleting the active item, switch to the first item
-                                                newActiveIndex = newMediaItems.length > 0 ? 0 : undefined;
-                                              } else if (mediaIndex < newActiveIndex) {
-                                                // If deleting an item before the active one, adjust index
-                                                newActiveIndex = newActiveIndex - 1;
-                                              }
-                                              
-                                              updated[index] = {
-                                                ...updated[index],
-                                                mediaItems: newMediaItems.length > 0 ? newMediaItems : undefined,
-                                                activeMediaIndex: newActiveIndex,
-                                                // Fallback to mediaUrl if no mediaItems left
-                                                ...(newMediaItems.length === 0 && {
-                                                  mediaUrl: undefined,
-                                                  mediaType: undefined,
-                                                }),
-                                              };
-                                              setScenesData(updated);
-                                            }}
-                                          />
-                                        ))}
-                                      </div>
-                                    </SortableContext>
-                                  ) : (
-                                    <div className="grid grid-cols-3 gap-2">
-                                      {mediaItems.map((mediaItem, mediaIndex) => (
-                                        <SortableMediaItem
-                                          key={mediaItem.id}
-                                          mediaItem={mediaItem}
-                                          index={mediaIndex}
-                                          isActive={mediaIndex === activeMediaIndex}
-                                          canDelete={false}
-                                          onSelect={() => {
-                                            const updated = [...scenesData];
-                                            updated[index] = {
-                                              ...updated[index],
-                                              activeMediaIndex: mediaIndex,
-                                              mediaItems: updated[index].mediaItems || mediaItems,
-                                            };
-                                            setScenesData(updated);
-                                          }}
-                                          onDelete={() => {
-                                            // Prevent deletion if only one item
-                                          }}
-                                        />
-                                      ))}
-                                            </div>
-                                        )}
-                                      </div>
-                              )}
+                                </div>
+                              </div>
                             </div>
 
                             {/* Right Side - Scene Details */}
                             <div className="flex-1 flex flex-col space-y-3 min-w-0">
-                              {/* Caption Section with Duration */}
+                              {/* Caption Section */}
                               <div>
-                                <div className="flex items-center justify-between mb-1">
-                                  <Label className="text-xs font-semibold">Caption</Label>
-                                  <div className="flex items-center gap-2">
-                                    <Label className="text-xs font-semibold">Scene Duration</Label>
-                                    <div className="flex items-center gap-1 border border-border rounded-md px-1.5 h-7 bg-background">
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-5 w-5 hover:bg-secondary"
-                                        onClick={() => {
-                                          const currentDuration = scene.duration || "5s";
-                                          const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
-                                          const newValue = Math.max(1, numericValue - 1);
-                                          const updated = [...scenesData];
-                                          updated[index].duration = `${newValue}s`;
-                                          setScenesData(updated);
-                                      }}
-                                    >
-                                        <Minus className="w-3 h-3" />
-                                    </Button>
-                                      <Input
-                                        type="text"
-                                        value={scene.duration || "5s"}
-                                        onChange={(e) => {
-                                          const updated = [...scenesData];
-                                          updated[index].duration = e.target.value;
-                                          setScenesData(updated);
-                                  }}
-                                        className="h-5 w-10 text-xs text-center border-0 p-0 bg-transparent focus-visible:ring-0"
-                                        placeholder="5s"
-                                      />
-                        <Button
-                                        type="button"
-                                        variant="ghost"
-                      size="icon"
-                                        className="h-5 w-5 hover:bg-secondary"
-                                        onClick={() => {
-                                          const currentDuration = scene.duration || "5s";
-                                          const numericValue = parseInt(currentDuration.replace('s', '')) || 5;
-                                          const newValue = numericValue + 1;
-                                          const updated = [...scenesData];
-                                          updated[index].duration = `${newValue}s`;
-                                          setScenesData(updated);
-                                        }}
-                    >
-                                        <Plus className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-                                </div>
-                            <Textarea
-                              value={scene.caption}
-                              onChange={(e) => {
-                                const updated = [...scenesData];
-                                updated[index].caption = e.target.value;
-                                // If "Same as Caption" mode is enabled, sync voiceover
-                                const mode = updated[index].voiceoverMode || (updated[index].sameAsCaption ? 'sameAsCaption' : 'custom');
-                                if (mode === 'sameAsCaption') {
-                                  updated[index].voiceover = e.target.value;
-                                }
-                                setScenesData(updated);
-                              }}
-                                  className="min-h-[32px] text-sm w-full"
-                              placeholder="Enter caption text..."
-                            />
-                          </div>
+                                <Label className="text-xs font-semibold mb-1 block">Caption</Label>
+                                <Textarea
+                                value={scene.caption}
+                                onChange={(e) => {
+                                  const updated = [...scenesData];
+                                  updated[index].caption = e.target.value;
+                                  // If "Same as Caption" mode is enabled, sync voiceover
+                                  const mode = updated[index].voiceoverMode || (updated[index].sameAsCaption ? 'sameAsCaption' : 'custom');
+                                  if (mode === 'sameAsCaption') {
+                                    updated[index].voiceover = e.target.value;
+                                  }
+                                  setScenesData(updated);
+                                }}
+                                className="min-h-[32px] text-sm w-full"
+                                placeholder="Enter caption text..."
+                              />
+                            </div>
 
                           {/* Voiceover Section */}
                           <div>
@@ -3371,9 +3327,9 @@ export function VideoCreationForm({
                                     <SelectValue placeholder="Select voiceover option" />
                                   </SelectTrigger>
                                   <SelectContent className="rounded-none">
-                                        <SelectItem value="noCaption" className="text-xs rounded-none">No Voiceover</SelectItem>
-                                    <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
+                                    <SelectItem value="noCaption" className="text-xs rounded-none">No Voiceover</SelectItem>
                                     <SelectItem value="sameAsCaption" className="text-xs rounded-none">Same as Caption</SelectItem>
+                                    <SelectItem value="custom" className="text-xs rounded-none">Custom</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -3394,24 +3350,229 @@ export function VideoCreationForm({
                                 disabled={voiceoverMode === 'sameAsCaption'}
                               />
                             )}
-                              </div>
                           </div>
 
-                        {/* Drag Handle - Right Side (outside the input box) */}
-                        <div className="flex-shrink-0 flex items-center self-center">
-                          <div
-                            {...attributes}
-                            {...listeners}
-                            data-drag-handle
-                            className="p-2 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background cursor-grab active:cursor-grabbing"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <GripVertical className="w-4 h-4 text-muted-foreground" />
+                              {/* Add Media Button - Show when single media or no media items */}
+                              {mediaItems.length <= 1 && (
+                                <div className="flex justify-end">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs px-2"
+                                    onClick={() => {
+                                      setIsAddingMedia(true);
+                                      setAddMediaSceneIndex(index);
+                                      setReplaceVideoSceneIndex(index);
+                                      setReplaceVideoTab("upload");
+                                      setReplaceVideoSearchQuery("");
+                                      setIsReplaceVideoDialogOpen(true);
+                                    }}
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    Add Media
+                                  </Button>
+                                </div>
+                              )}
+
+                              {/* Media Items Section - Only show if more than one item */}
+                              {mediaItems.length > 1 && (
+                              <div>
+                                <div className="flex items-center justify-between mb-2">
+                                  <Label className="text-xs font-semibold block text-muted-foreground">Media Items</Label>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs px-2"
+                                    onClick={() => {
+                                      setIsAddingMedia(true);
+                                      setAddMediaSceneIndex(index);
+                                      setReplaceVideoSceneIndex(index);
+                                      setReplaceVideoTab("upload");
+                                      setReplaceVideoSearchQuery("");
+                                      setIsReplaceVideoDialogOpen(true);
+                                    }}
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    Add
+                                  </Button>
+                                </div>
+                                {mediaItems.length > 0 && (
+                                  <div className="w-full">
+                                    {mediaItems.length > 1 ? (
+                                      <SortableContext
+                                        items={mediaItems.map(item => item.id)}
+                                        strategy={verticalListSortingStrategy}
+                                      >
+                                        <div className="grid grid-cols-5 gap-1">
+                                          {mediaItems.map((mediaItem, mediaIndex) => (
+                                            <SortableMediaItem
+                                              key={mediaItem.id}
+                                              mediaItem={mediaItem}
+                                              index={mediaIndex}
+                                              isActive={mediaIndex === activeMediaIndex}
+                                              canDelete={mediaItems.length > 1}
+                                              sceneIndex={index}
+                                              onSelect={() => {
+                                                const updated = [...scenesData];
+                                                updated[index] = {
+                                                  ...updated[index],
+                                                  activeMediaIndex: mediaIndex,
+                                                  mediaItems: updated[index].mediaItems || mediaItems,
+                                                };
+                                                setScenesData(updated);
+                                              }}
+                                              onDelete={() => {
+                                                const updated = [...scenesData];
+                                                const currentMediaItems = updated[index].mediaItems || mediaItems;
+                                                const newMediaItems = currentMediaItems.filter((_, i) => i !== mediaIndex);
+                                                
+                                                // Update activeMediaIndex if needed
+                                                let newActiveIndex = updated[index].activeMediaIndex ?? 0;
+                                                if (mediaIndex === newActiveIndex) {
+                                                  // If deleting the active item, switch to the first item
+                                                  newActiveIndex = newMediaItems.length > 0 ? 0 : undefined;
+                                                } else if (mediaIndex < newActiveIndex) {
+                                                  // If deleting an item before the active one, adjust index
+                                                  newActiveIndex = newActiveIndex - 1;
+                                                }
+                                                
+                                                // Calculate total duration from remaining media items
+                                                const totalSeconds = newMediaItems.length > 0 ? newMediaItems.reduce((sum, item) => {
+                                                  if (item.type === 'video') {
+                                                    const videoDuration = item.videoDuration;
+                                                    if (videoDuration) {
+                                                      if (typeof videoDuration === 'string') {
+                                                        const parts = videoDuration.split(':');
+                                                        if (parts.length === 2) {
+                                                          return sum + parseInt(parts[0]) * 60 + parseInt(parts[1]);
+                                                        }
+                                                        return sum + parseInt(videoDuration) || 0;
+                                                      }
+                                                      return sum + (videoDuration || 0);
+                                                    }
+                                                    const dur = item.duration?.replace('s', '') || '0';
+                                                    return sum + (parseInt(dur) || 0);
+                                                  } else {
+                                                    const dur = item.duration?.replace('s', '') || '5';
+                                                    return sum + (parseInt(dur) || 5);
+                                                  }
+                                                }, 0) : 0;
+                                                
+                                                updated[index] = {
+                                                  ...updated[index],
+                                                  mediaItems: newMediaItems.length > 0 ? newMediaItems : undefined,
+                                                  activeMediaIndex: newActiveIndex,
+                                                  duration: `${totalSeconds}s`,
+                                                  // Fallback to mediaUrl if no mediaItems left
+                                                  ...(newMediaItems.length === 0 && {
+                                                    mediaUrl: undefined,
+                                                    mediaType: undefined,
+                                                  }),
+                                                };
+                                                setScenesData(updated);
+                                              }}
+                                              onDurationChange={(duration) => {
+                                                const updated = [...scenesData];
+                                                const currentMediaItems = updated[index].mediaItems || mediaItems;
+                                                currentMediaItems[mediaIndex] = {
+                                                  ...currentMediaItems[mediaIndex],
+                                                  duration: duration,
+                                                };
+                                                // Calculate total duration from all media items
+                                                const totalSeconds = currentMediaItems.reduce((sum, item) => {
+                                                  if (item.type === 'video') {
+                                                    const videoDuration = item.videoDuration;
+                                                    if (videoDuration) {
+                                                      if (typeof videoDuration === 'string') {
+                                                        const parts = videoDuration.split(':');
+                                                        if (parts.length === 2) {
+                                                          return sum + parseInt(parts[0]) * 60 + parseInt(parts[1]);
+                                                        }
+                                                        return sum + parseInt(videoDuration) || 0;
+                                                      }
+                                                      return sum + (videoDuration || 0);
+                                                    }
+                                                    const dur = item.duration?.replace('s', '') || '0';
+                                                    return sum + (parseInt(dur) || 0);
+                                                  } else {
+                                                    const dur = item.duration?.replace('s', '') || '5';
+                                                    return sum + (parseInt(dur) || 5);
+                                                  }
+                                                }, 0);
+                                                updated[index] = {
+                                                  ...updated[index],
+                                                  mediaItems: currentMediaItems,
+                                                  duration: `${totalSeconds}s`,
+                                                };
+                                                setScenesData(updated);
+                                              }}
+                                            />
+                                          ))}
+                                        </div>
+                                      </SortableContext>
+                                    ) : (
+                                      <div className="grid grid-cols-5 gap-1">
+                                        {mediaItems.map((mediaItem, mediaIndex) => (
+                                          <SortableMediaItem
+                                            key={mediaItem.id}
+                                            mediaItem={mediaItem}
+                                            index={mediaIndex}
+                                            isActive={mediaIndex === activeMediaIndex}
+                                            canDelete={false}
+                                            sceneIndex={index}
+                                            onSelect={() => {
+                                              const updated = [...scenesData];
+                                              updated[index] = {
+                                                ...updated[index],
+                                                activeMediaIndex: mediaIndex,
+                                                mediaItems: updated[index].mediaItems || mediaItems,
+                                              };
+                                              setScenesData(updated);
+                                            }}
+                                            onDelete={() => {
+                                              // Prevent deletion if only one item
+                                            }}
+                                            onDurationChange={(duration) => {
+                                              const updated = [...scenesData];
+                                              const currentMediaItems = updated[index].mediaItems || mediaItems;
+                                              currentMediaItems[mediaIndex] = {
+                                                ...currentMediaItems[mediaIndex],
+                                                duration: duration,
+                                              };
+                                              updated[index] = {
+                                                ...updated[index],
+                                                mediaItems: currentMediaItems,
+                                              };
+                                              setScenesData(updated);
+                                            }}
+                                          />
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              )}
+                            </div>
+
+                            {/* Drag Handle - Right Side (outside the box) */}
+                            <div className="absolute -right-10 top-1/2 -translate-y-1/2 flex-shrink-0 flex items-center z-10">
+                              <div
+                                {...attributes}
+                                {...listeners}
+                                data-drag-handle
+                                className="p-2 rounded bg-background/90 backdrop-blur-sm border border-border/50 hover:bg-background cursor-grab active:cursor-grabbing"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <GripVertical className="w-4 h-4 text-muted-foreground" />
+                              </div>
+                            </div>
+                              </div>
+                              )}
+                            </SortableSceneRow>
                           </div>
-                        </div>
-                        </div>
-                            )}
-                          </SortableSceneRow>
                       );
                     })}
                     </div>
@@ -3782,7 +3943,7 @@ export function VideoCreationForm({
                   <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">VO Volume</Label>
                   <Select
                     value={formData.voiceoverVolumeType}
-                    onValueChange={(value: "default" | "adaptive" | "custom") => {
+                    onValueChange={(value: "adaptive" | "custom") => {
                       setFormData({ ...formData, voiceoverVolumeType: value });
                     }}
                   >
@@ -3790,7 +3951,6 @@ export function VideoCreationForm({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Default</SelectItem>
                       <SelectItem value="adaptive">Adaptive Volume</SelectItem>
                       <SelectItem value="custom">Custom</SelectItem>
                     </SelectContent>
@@ -3947,11 +4107,14 @@ export function VideoCreationForm({
                                   url: url,
                                   type: 'image',
                                   thumbnail: url,
+                                  duration: '5s',
                                 };
+                                const updatedMediaItems = [...currentMediaItems, newMediaItem];
                                 updated[replaceVideoSceneIndex] = {
                                   ...updated[replaceVideoSceneIndex],
-                                  mediaItems: [...currentMediaItems, newMediaItem],
+                                  mediaItems: updatedMediaItems,
                                   activeMediaIndex: currentMediaItems.length, // Set as active
+                                  duration: `${calculateTotalDuration(updatedMediaItems)}s`,
                                 };
                               } else {
                                 // Replace existing media
@@ -4091,6 +4254,21 @@ export function VideoCreationForm({
                   onLoadedMetadata={(e) => {
                     const video = e.currentTarget;
                     video.volume = isVideoTrimMuted ? 0 : videoTrimVolume / 100;
+                  }}
+                  onTimeUpdate={(e) => {
+                    const video = e.currentTarget;
+                    const currentSeconds = Math.floor(video.currentTime);
+                    setVideoTrimCurrentTime(currentSeconds);
+                    // Stop at end time
+                    const endSeconds = parseTime(videoTrimEndTime);
+                    if (video.currentTime >= endSeconds) {
+                      video.pause();
+                      setIsVideoTrimPlaying(false);
+                      video.currentTime = endSeconds;
+                    }
+                  }}
+                  onLoadedMetadata={(e) => {
+                    const video = e.currentTarget;
                     if (video.duration && video.duration > 0) {
                       const durationString = formatTime(Math.floor(video.duration));
                       setVideoTrimEndTime(durationString);
@@ -4106,18 +4284,6 @@ export function VideoCreationForm({
                       const durationParts = selectedVideoForTrim.duration.split(":");
                       const durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
                       setVideoTrimEndTime(selectedVideoForTrim.duration);
-                    }
-                  }}
-                  onTimeUpdate={(e) => {
-                    const video = e.currentTarget;
-                    const currentSeconds = Math.floor(video.currentTime);
-                    setVideoTrimCurrentTime(currentSeconds);
-                    // Stop at end time
-                    const endSeconds = parseTime(videoTrimEndTime);
-                    if (video.currentTime >= endSeconds) {
-                      video.pause();
-                      setIsVideoTrimPlaying(false);
-                      video.currentTime = endSeconds;
                     }
                   }}
                 />
@@ -4670,11 +4836,14 @@ export function VideoCreationForm({
                             url: videoUrl,
                             type: 'video',
                             thumbnail: selectedVideoForTrim.thumbnail,
+                            videoDuration: selectedVideoForTrim.duration,
                           };
+                          const updatedMediaItems = [...currentMediaItems, newMediaItem];
                       updated[replaceVideoSceneIndex] = {
                         ...updated[replaceVideoSceneIndex],
-                            mediaItems: [...currentMediaItems, newMediaItem],
+                            mediaItems: updatedMediaItems,
                             activeMediaIndex: currentMediaItems.length, // Set as active
+                            duration: `${calculateTotalDuration(updatedMediaItems)}s`,
                           };
                         } else {
                           // Replace existing media

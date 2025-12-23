@@ -28,7 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
-m
+
+interface ArticleSelectionProps {
   onBack: () => void;
   onContinue: (selectedArticles: string[]) => void;
 }
