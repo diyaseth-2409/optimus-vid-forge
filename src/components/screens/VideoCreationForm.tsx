@@ -9,6 +9,7 @@ import {
   Upload,
   Wand2,
   Video,
+  Image,
   Sun,
   Moon,
   Check,
@@ -744,7 +745,11 @@ function SortableMediaItem({
   };
 
   const handleDurationChange = (delta: number) => {
-    if (!onDurationChange || mediaItem.type !== 'image') return;
+    if (mediaItem.type !== 'image') return;
+    if (!onDurationChange) {
+      console.warn("onDurationChange not provided for media item");
+      return;
+    }
     const currentDuration = parseInt(mediaItem.duration?.replace('s', '') || '5') || 5;
     const newDuration = Math.max(1, currentDuration + delta);
     onDurationChange(`${newDuration}s`);
@@ -755,15 +760,23 @@ function SortableMediaItem({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
       className={cn(
-        "relative rounded border overflow-hidden cursor-move transition-all group",
+        "relative rounded border overflow-hidden transition-all group",
         isActive
           ? "ring-2 ring-primary border-primary"
           : "border-border hover:border-primary/50"
       )}
       onClick={onSelect}
     >
+      {/* Drag handle - small grip icon in top-left */}
+      <div
+        {...listeners}
+        className="absolute top-0.5 left-0.5 z-10 p-0.5 rounded bg-black/60 backdrop-blur-sm cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <GripVertical className="w-2 h-2 text-white" />
+      </div>
       <div className="aspect-video w-full">
         {mediaItem.type === 'video' ? (
           <video
@@ -830,33 +843,61 @@ function SortableMediaItem({
         )
       ) : (
         <div 
-          className="absolute bottom-0.5 left-0.5 right-0.5 flex items-center justify-between gap-1 px-1 py-0.5 rounded bg-black/80 backdrop-blur-sm"
+          className="absolute bottom-0.5 left-0.5 right-0.5 flex items-center justify-between gap-1 px-1 py-0.5 rounded bg-black/80 backdrop-blur-sm z-20"
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+          }}
         >
           <Button
             variant="ghost"
             size="icon"
-            className="h-3 w-3 p-0 hover:bg-white/20"
+            className="h-3 w-3 p-0 hover:bg-white/20 z-30"
             onClick={(e) => {
               e.stopPropagation();
+              e.preventDefault();
               handleDurationChange(-1);
             }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            type="button"
           >
-            <Minus className="w-2 h-2 text-white" />
+            <Minus className="w-2 h-2 text-white pointer-events-none" />
           </Button>
-          <span className="text-[10px] text-white font-medium min-w-[20px] text-center">
+          <span className="text-[10px] text-white font-medium min-w-[20px] text-center pointer-events-none">
             {mediaItem.duration || '5s'}
           </span>
           <Button
             variant="ghost"
             size="icon"
-            className="h-3 w-3 p-0 hover:bg-white/20"
+            className="h-3 w-3 p-0 hover:bg-white/20 z-30"
             onClick={(e) => {
               e.stopPropagation();
+              e.preventDefault();
               handleDurationChange(1);
             }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            type="button"
           >
-            <Plus className="w-2 h-2 text-white" />
+            <Plus className="w-2 h-2 text-white pointer-events-none" />
           </Button>
         </div>
       )}
@@ -968,6 +1009,7 @@ export function VideoCreationForm({
   const [replaceVideoSceneIndex, setReplaceVideoSceneIndex] = useState<number | null>(null);
   const [isAddingMedia, setIsAddingMedia] = useState(false);
   const [addMediaSceneIndex, setAddMediaSceneIndex] = useState<number | null>(null);
+  const [replaceMediaIndex, setReplaceMediaIndex] = useState<number | null>(null); // Index of media item to replace
   const [replaceVideoTab, setReplaceVideoTab] = useState<"upload" | "slike">("upload");
   const [replaceVideoSearchQuery, setReplaceVideoSearchQuery] = useState("");
   const [selectedVideoForTrim, setSelectedVideoForTrim] = useState<{ id: string; title: string; thumbnail: string; duration: string; file?: File; url?: string } | null>(null);
@@ -987,8 +1029,9 @@ export function VideoCreationForm({
   
   // Logo configuration state
   const [uploadedLogo, setUploadedLogo] = useState<string | null>(null);
-  const [logoPlacement, setLogoPlacement] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right" | null>(null);
-  const [logoToggle, setLogoToggle] = useState<"no-logo" | "upload-logo">("no-logo");
+  const [logoPlacement, setLogoPlacement] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
+  const [logoOpacity, setLogoOpacity] = useState<string>("80%");
+  const [selectedLogoIndex, setSelectedLogoIndex] = useState<number | null>(null);
   
   // Pre and Post Slates state
   const [preSlate, setPreSlate] = useState<string | null>(null);
@@ -2746,29 +2789,28 @@ export function VideoCreationForm({
             
             {/* Section 2: Logo Upload and Placement */}
             <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
-              {/* Section Header with Preview */}
-              <div className="flex items-start justify-between gap-6 mb-6">
-                <div className="flex items-center gap-3 flex-1">
+              {/* Header row: title on left, controls on right */}
+              <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+                <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-primary/10">
-                    <Upload className="w-5 h-5 text-primary" />
+                    <Image className="w-5 h-5 text-primary" />
                   </div>
                   <div>
                     <Label className="text-lg font-semibold">Logo</Label>
-                    <p className="text-xs text-muted-foreground mt-0.5">Upload and position your logo on the video</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Choose transparent PNG image</p>
                   </div>
                 </div>
-                
-                {/* Preview screen with logo */}
-                <div className="space-y-2">
-                  {/* Position Dropdown - Only show when logo is uploaded */}
-                  {uploadedLogo && (
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm font-medium whitespace-nowrap">Position</Label>
                     <Select
-                      value={logoPlacement || ""}
+                      value={logoPlacement}
                       onValueChange={(value: "top-left" | "top-right" | "bottom-left" | "bottom-right") => {
                         setLogoPlacement(value);
                       }}
+                      disabled={!uploadedLogo}
                     >
-                      <SelectTrigger className="h-7 text-xs w-32">
+                      <SelectTrigger className="h-8 text-sm w-32" disabled={!uploadedLogo}>
                         <SelectValue placeholder="Position" />
                       </SelectTrigger>
                       <SelectContent>
@@ -2778,58 +2820,84 @@ export function VideoCreationForm({
                         <SelectItem value="bottom-right">Bottom Right</SelectItem>
                       </SelectContent>
                     </Select>
-                  )}
-                  <div
-                    onClick={() => {
-                      if (!uploadedLogo) {
-                        const input = document.createElement('input');
-                        input.type = 'file';
-                        input.accept = 'image/*';
-                        input.onchange = (e) => {
-                          const file = (e.target as HTMLInputElement).files?.[0];
-                          if (file) {
-                            const url = URL.createObjectURL(file);
-                            setUploadedLogo(url);
-                            setLogoToggle("upload-logo");
-                            if (!logoPlacement) {
-                              setLogoPlacement("top-right");
-                            }
-                          }
-                        };
-                        input.click();
-                      }
-                    }}
-                    className="relative bg-black rounded-lg border border-border aspect-video w-32 flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 transition-colors"
-                  >
-                    {uploadedLogo && logoPlacement ? (
-                      <>
-                        <img
-                          src={uploadedLogo}
-                          alt="Logo preview"
-                          className={cn(
-                            "absolute max-h-[20%] max-w-[20%] object-contain",
-                            logoPlacement === "top-left" && "top-2 left-2",
-                            logoPlacement === "top-right" && "top-2 right-2",
-                            logoPlacement === "bottom-left" && "bottom-2 left-2",
-                            logoPlacement === "bottom-right" && "bottom-2 right-2"
-                          )}
-                        />
-                        <button
-                          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-xs font-medium text-white hover:text-white/80 transition-colors cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setUploadedLogo(null);
-                            setLogoToggle("no-logo");
-                            setLogoPlacement(null);
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </>
-                    ) : (
-                      <span className="text-white/70 font-medium text-sm">No Logo</span>
-                    )}
                   </div>
+                <div className="flex items-center gap-2 min-w-[160px]">
+                  <Label className="text-sm font-medium whitespace-nowrap">Opacity</Label>
+                  <div className="flex-1 flex items-center gap-2">
+                    <Slider
+                      value={[parseInt(logoOpacity.replace('%', '')) || 0]}
+                      max={100}
+                      min={0}
+                      step={1}
+                      onValueChange={(val) => setLogoOpacity(`${val[0]}%`)}
+                      disabled={!uploadedLogo}
+                    />
+                    <span className="text-sm font-medium w-10 text-right">{logoOpacity}</span>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (file) {
+                        const url = URL.createObjectURL(file);
+                        setUploadedLogo(url);
+                        setSelectedLogoIndex(null);
+                      }
+                    };
+                    input.click();
+                  }}
+                >
+                  <Upload className="w-3 h-3 mr-1" />
+                  Upload
+                </Button>
+                </div>
+              </div>
+
+              {/* Choose logos in a single line */}
+              <div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {[
+                    { name: "Corporate Logo", image: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=200&h=200&fit=crop" },
+                    { name: "Modern Logo", image: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200&h=200&fit=crop" },
+                    { name: "Creative Logo", image: "https://images.unsplash.com/photo-1635776062043-223faf9fa6ef?w=200&h=200&fit=crop" },
+                    { name: "Tech Logo", image: "https://images.unsplash.com/photo-1516259762381-22954d7d3ad2?w=200&h=200&fit=crop" },
+                    { name: "Brand Logo", image: "https://images.unsplash.com/photo-1558655146-364adaf1fcc9?w=200&h=200&fit=crop" }
+                  ].map((logo, index) => (
+                    <div
+                      key={index}
+                      onClick={() => {
+                        setUploadedLogo(logo.image);
+                        setSelectedLogoIndex(index);
+                      }}
+                      className={cn(
+                        "relative rounded-lg border overflow-hidden cursor-pointer transition-all w-28 h-16 flex-shrink-0",
+                        selectedLogoIndex === index && uploadedLogo
+                          ? "border-primary ring-2 ring-primary/30"
+                          : "border-border hover:border-primary/50"
+                      )}
+                    >
+                      <img
+                        src={logo.image}
+                        alt={logo.name}
+                        className="w-full h-full object-cover"
+                      />
+                      {selectedLogoIndex === index && uploadedLogo && (
+                        <div className="absolute bottom-1 left-1/2 -translate-x-1/2">
+                          <div className="bg-primary rounded-full p-0.5">
+                            <Check className="w-2.5 h-2.5 text-white" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -3002,7 +3070,7 @@ export function VideoCreationForm({
                         items={scenesData.map((s) => s.id)}
                         strategy={verticalListSortingStrategy}
                       >
-                    <div className="space-y-4 p-4">
+                    <div className="space-y-2 py-1 px-3 pb-0">
                     {scenesData.map((scene, index) => {
                         const voiceoverMode = scene.voiceoverMode || (scene.sameAsCaption ? 'sameAsCaption' : 'custom');
                         const isActiveScene = activeSceneIndex === index;
@@ -3037,7 +3105,7 @@ export function VideoCreationForm({
                               key={`${scene.id}-${previewFormat}`}
                       data-scene-preview={index}
                       className={cn(
-                                "relative rounded-lg border overflow-hidden w-full",
+                                "relative rounded-lg border overflow-hidden w-full group",
                                 previewFormat === "9:16" ? "aspect-[9/16]" : "aspect-video"
                       )}
                     >
@@ -3088,41 +3156,35 @@ export function VideoCreationForm({
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/40 to-transparent" />
                       
-                      {/* Play Button Overlay */}
+                      {/* Play Button Overlay - Show on hover */}
                       {((activeMedia && activeMedia.type === 'video') || scene.mediaType === 'video') && (
                         <div 
-                          className="absolute inset-0 flex items-center justify-center bg-background/40 opacity-0 hover:opacity-100 transition-opacity z-30"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const videoRef = thumbnailVideoRefs.current[scene.id];
-                            if (videoRef) {
-                              if (playingThumbnails[scene.id]) {
-                                videoRef.pause();
-                                setPlayingThumbnails(prev => ({ ...prev, [scene.id]: false }));
-                              } else {
-                                videoRef.play();
-                                setPlayingThumbnails(prev => ({ ...prev, [scene.id]: true }));
-                              }
-                            }
-                          }}
+                          className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-40 pointer-events-none"
                         >
-                          {!playingThumbnails[scene.id] ? (
-                            <Button
-                              variant="secondary"
-                              size="icon"
-                              className="h-12 w-12 rounded-full bg-background/90 hover:bg-background"
-                            >
-                              <Play className="w-6 h-6" />
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="secondary"
-                              size="icon"
-                              className="h-12 w-12 rounded-full bg-background/90 hover:bg-background"
-                            >
-                              <Pause className="w-6 h-6" />
-                            </Button>
-                          )}
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-14 w-14 rounded-full bg-background/95 hover:bg-background shadow-lg pointer-events-auto"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const videoRef = thumbnailVideoRefs.current[scene.id];
+                              if (videoRef) {
+                                if (playingThumbnails[scene.id]) {
+                                  videoRef.pause();
+                                  setPlayingThumbnails(prev => ({ ...prev, [scene.id]: false }));
+                                } else {
+                                  videoRef.play();
+                                  setPlayingThumbnails(prev => ({ ...prev, [scene.id]: true }));
+                                }
+                              }
+                            }}
+                          >
+                            {playingThumbnails[scene.id] ? (
+                              <Pause className="w-7 h-7" />
+                            ) : (
+                              <Play className="w-7 h-7 ml-0.5" />
+                            )}
+                          </Button>
                         </div>
                       )}
 
@@ -3191,22 +3253,33 @@ export function VideoCreationForm({
                         );
                       })()}
                       
-                            {/* Replace Media overlay button */}
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="gap-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setReplaceVideoSceneIndex(index);
-                            setIsReplaceVideoDialogOpen(true);
-                          }}
-                        >
-                          <Upload className="w-4 h-4" />
-                                Replace Media
-                        </Button>
-                      </div>
+                            {/* Play Button Overlay - Only show for videos */}
+                      {((activeMedia && activeMedia.type === 'video') || scene.mediaType === 'video') && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/60 opacity-0 hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-12 w-12 rounded-full"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const videoRef = thumbnailVideoRefs.current[scene.id];
+                              if (videoRef) {
+                                if (videoRef.paused) {
+                                  videoRef.play();
+                                } else {
+                                  videoRef.pause();
+                                }
+                              }
+                            }}
+                          >
+                            {playingThumbnails[scene.id] ? (
+                              <Pause className="w-6 h-6" />
+                            ) : (
+                              <Play className="w-6 h-6" />
+                            )}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   );
                         };
@@ -3228,25 +3301,22 @@ export function VideoCreationForm({
                                   }}
                                   style={style}
                                   className={cn(
-                                    "flex gap-4 rounded-lg p-4 transition-all border relative",
+                                    "flex gap-3 rounded-lg p-2 transition-all border relative",
                                     isActiveScene 
                                       ? "border-2 border-primary ring-2 ring-primary/30 shadow-md bg-primary/5" 
                                       : "border-border",
-                                    index < scenesData.length - 1 && "mb-4 pb-4 border-b"
+                                    index < scenesData.length - 1 && "mb-2 border-b"
                                   )}
                                 >
                             {/* Left Side - Scene Preview */}
                             <div className={cn(
-                              "flex-shrink-0 flex flex-col gap-3",
-                              isVerticalFormat ? "w-[200px]" : "w-[300px]"
+                              "flex-shrink-0 flex flex-col gap-1.5",
+                              isVerticalFormat ? "w-[220px]" : "w-[340px]"
                             )}>
                               {/* Non-sortable thumbnail preview - sorting is handled at row level */}
                               <div
                                 className={cn(
-                                  "relative rounded-lg border-2 overflow-hidden transition-all cursor-pointer",
-                                  isActiveScene
-                                    ? "border-primary ring-2 ring-primary/30 shadow-md"
-                                    : "border-border hover:border-primary/50"
+                                  "relative rounded-lg border-2 overflow-hidden transition-all cursor-pointer border-border hover:border-primary/50 group"
                                 )}
                                 onClick={(e) => {
                                   if (!(e.target as HTMLElement).closest('[data-caption-overlay]')) {
@@ -3262,31 +3332,57 @@ export function VideoCreationForm({
                                   }
                                 }}
                               >
-                                <div className={isVerticalFormat ? "max-w-[200px] mx-auto" : ""}>
-                                  <div className="p-2">
+                                <div className={isVerticalFormat ? "max-w-[220px] mx-auto" : ""}>
+                                  <div className="p-1 relative">
                                     {renderPreview(isVerticalFormat ? "9:16" : "16:9", isVerticalFormat ? "Vertical" : "Horizontal")}
+                                    
+                                    {/* Play Button Overlay - Only show for videos on hover */}
+                                    {((activeMedia && activeMedia.type === 'video') || scene.mediaType === 'video') && (
+                                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none">
+                                        <Button
+                                          variant="secondary"
+                                          size="icon"
+                                          className="h-14 w-14 rounded-full bg-background/95 hover:bg-background shadow-lg pointer-events-auto"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const videoRef = thumbnailVideoRefs.current[scene.id];
+                                            if (videoRef) {
+                                              if (playingThumbnails[scene.id]) {
+                                                videoRef.pause();
+                                                setPlayingThumbnails(prev => ({ ...prev, [scene.id]: false }));
+                                              } else {
+                                                videoRef.play();
+                                                setPlayingThumbnails(prev => ({ ...prev, [scene.id]: true }));
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          {playingThumbnails[scene.id] ? (
+                                            <Pause className="w-7 h-7" />
+                                          ) : (
+                                            <Play className="w-7 h-7 ml-0.5" />
+                                          )}
+                                        </Button>
+                                      </div>
+                                    )}
                   </div>
                                 </div>
                               </div>
                               
-                              {/* Scene Duration - Below thumbnail */}
-                              <div className="w-full mt-3">
-                                <div className="flex items-center justify-between">
-                                  <Label className="text-xs font-semibold text-muted-foreground shrink-0">Scene Duration</Label>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-sm font-medium text-muted-foreground min-w-[40px] text-center">
-                                      {`${calculateTotalDuration(mediaItems)}s`}
-                                    </span>
-                                  </div>
-                                </div>
+                              {/* Scene Duration - Compact */}
+                              <div className="flex items-center gap-1.5 px-1">
+                                <Label className="text-[10px] font-semibold text-muted-foreground shrink-0">Scene Duration</Label>
+                                <span className="text-xs font-medium text-muted-foreground">
+                                  {`${calculateTotalDuration(mediaItems)}s`}
+                                </span>
                               </div>
                             </div>
 
                             {/* Right Side - Scene Details */}
-                            <div className="flex-1 flex flex-col space-y-3 min-w-0">
-                              {/* Caption Section */}
+                            <div className="flex-1 flex flex-col space-y-2 min-w-0 max-w-[500px]">
+                              {/* Caption Section - Compact */}
                               <div>
-                                <Label className="text-xs font-semibold mb-1 block">Caption</Label>
+                                <Label className="text-xs font-semibold mb-0.5 block">Caption</Label>
                                 <Textarea
                                 value={scene.caption}
                                 onChange={(e) => {
@@ -3299,14 +3395,14 @@ export function VideoCreationForm({
                                   }
                                   setScenesData(updated);
                                 }}
-                                className="min-h-[32px] text-sm w-full"
+                                className="min-h-[28px] text-xs w-full py-1.5"
                                 placeholder="Enter caption text..."
                               />
                             </div>
 
-                          {/* Voiceover Section */}
+                          {/* Voiceover Section - Compact */}
                           <div>
-                            <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center gap-2 mb-1">
                               <Label className="text-xs font-semibold shrink-0">Voiceover</Label>
                               <div className="flex-1 flex justify-end">
                                 <Select
@@ -3345,59 +3441,17 @@ export function VideoCreationForm({
                                     setScenesData(updated);
                                   }
                                 }}
-                                className="min-h-[36px] text-xs w-full"
+                                className="min-h-[28px] text-xs w-full py-1.5"
                                 placeholder={voiceoverMode === 'sameAsCaption' ? "Same as caption (synced automatically)" : "Enter voiceover text..."}
                                 disabled={voiceoverMode === 'sameAsCaption'}
                               />
                             )}
                           </div>
 
-                              {/* Add Media Button - Show when single media or no media items */}
-                              {mediaItems.length <= 1 && (
-                                <div className="flex justify-end">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-xs px-2"
-                                    onClick={() => {
-                                      setIsAddingMedia(true);
-                                      setAddMediaSceneIndex(index);
-                                      setReplaceVideoSceneIndex(index);
-                                      setReplaceVideoTab("upload");
-                                      setReplaceVideoSearchQuery("");
-                                      setIsReplaceVideoDialogOpen(true);
-                                    }}
-                                  >
-                                    <Plus className="w-3 h-3 mr-1" />
-                                    Add Media
-                                  </Button>
-                                </div>
-                              )}
-
-                              {/* Media Items Section - Only show if more than one item */}
-                              {mediaItems.length > 1 && (
-                              <div>
-                                <div className="flex items-center justify-between mb-2">
-                                  <Label className="text-xs font-semibold block text-muted-foreground">Media Items</Label>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-xs px-2"
-                                    onClick={() => {
-                                      setIsAddingMedia(true);
-                                      setAddMediaSceneIndex(index);
-                                      setReplaceVideoSceneIndex(index);
-                                      setReplaceVideoTab("upload");
-                                      setReplaceVideoSearchQuery("");
-                                      setIsReplaceVideoDialogOpen(true);
-                                    }}
-                                  >
-                                    <Plus className="w-3 h-3 mr-1" />
-                                    Add
-                                  </Button>
-                                </div>
+                              {/* Media Items Section with Add Media inline */}
+                              <div className="flex items-start gap-2">
+                                {mediaItems.length > 0 && (
+                                <div className="flex-1">
                                 {mediaItems.length > 0 && (
                                   <div className="w-full">
                                     {mediaItems.length > 1 ? (
@@ -3534,6 +3588,12 @@ export function VideoCreationForm({
                                             onDelete={() => {
                                               // Prevent deletion if only one item
                                             }}
+                                            onReplace={() => {
+                                              setReplaceVideoSceneIndex(index);
+                                              setReplaceMediaIndex(mediaIndex);
+                                              setIsAddingMedia(false);
+                                              setIsReplaceVideoDialogOpen(true);
+                                            }}
                                             onDurationChange={(duration) => {
                                               const updated = [...scenesData];
                                               const currentMediaItems = updated[index].mediaItems || mediaItems;
@@ -3553,8 +3613,29 @@ export function VideoCreationForm({
                                     )}
                                   </div>
                                 )}
+                                </div>
+                                )}
+                                
+                                {/* Add Media Button - After media items */}
+                                <div className="flex justify-center mt-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={() => {
+                                      setIsAddingMedia(true);
+                                      setAddMediaSceneIndex(index);
+                                      setReplaceVideoSceneIndex(index);
+                                      setReplaceVideoTab("upload");
+                                      setReplaceVideoSearchQuery("");
+                                      setIsReplaceVideoDialogOpen(true);
+                                    }}
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                  </Button>
+                                </div>
                               </div>
-                              )}
                             </div>
 
                             {/* Drag Handle - Right Side (outside the box) */}
@@ -3619,10 +3700,6 @@ export function VideoCreationForm({
                         </div>
                       </div>
                     </div>
-                    <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
-                      <span>Duration: {scenesData.length * 5}s</span>
-                      <span>Scenes: {scenesData.length}</span>
-                    </div>
                   </div>
                 </TabsContent>
                 
@@ -3644,10 +3721,6 @@ export function VideoCreationForm({
                           </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
-                      <span>Duration: {scenesData.length * 5}s</span>
-                      <span>Scenes: {scenesData.length}</span>
                     </div>
                   </div>
                 </TabsContent>
@@ -3673,10 +3746,6 @@ export function VideoCreationForm({
                       </div>
                     </div>
                   </div>
-                  <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
-                    <span>Duration: {scenesData.length * 5}s</span>
-                    <span>Scenes: {scenesData.length}</span>
-                  </div>
                 </div>
               </div>
             ) : (
@@ -3699,10 +3768,6 @@ export function VideoCreationForm({
                         </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="absolute bottom-2 left-0 right-0 flex items-center justify-between text-[10px] text-muted-foreground px-4">
-                    <span>Duration: {scenesData.length * 5}s</span>
-                    <span>Scenes: {scenesData.length}</span>
                   </div>
                 </div>
               </div>
@@ -3848,6 +3913,20 @@ export function VideoCreationForm({
 
           <DialogFooter className="flex justify-between items-center px-6 py-4 border-t border-border">
             <div className="flex items-center gap-6">
+              {/* Duration and Scenes - Show on Preview and Quick Edits step and Final Output step */}
+              {(currentStep === 3 || currentStep === 4) && (
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="text-foreground">
+                    Total Scenes: <span className="text-muted-foreground">{scenesData.length}</span>
+                  </div>
+                  <div className="text-foreground">
+                    Video Duration: <span className="text-muted-foreground">{scenesData.reduce((total, scene) => {
+                      const mediaItems = scene.mediaItems || [];
+                      return total + calculateTotalDuration(mediaItems);
+                    }, 0)}s</span>
+                  </div>
+                </div>
+              )}
               {/* AI Voice - Only shown in 4th tab (Horizontal Preview) and if voiceover is enabled */}
               {currentStep === 3 && scenesData.some(scene => {
                 // Only show if voiceoverMode is explicitly set to 'custom' or 'sameAsCaption'
@@ -3972,16 +4051,6 @@ export function VideoCreationForm({
                   )}
                 </div>
               )}
-              {currentStep === 3 && (
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span>
-                    <span className="font-medium text-foreground">Total Scenes:</span> {scenesData.length}
-                  </span>
-                    <span>
-                    <span className="font-medium text-foreground">Video Duration:</span> {scenesData.length * 5}s
-                  </span>
-                </div>
-              )}
               <Button variant="outline" onClick={handleBack}>
                 {currentStep === 0 ? "Cancel" : "Back"}
               </Button>
@@ -4032,6 +4101,7 @@ export function VideoCreationForm({
           setReplaceVideoSceneIndex(null);
           setIsAddingMedia(false);
           setAddMediaSceneIndex(null);
+          setReplaceMediaIndex(null);
           setReplaceVideoTab("upload");
           setReplaceVideoSearchQuery("");
           setSelectedVideoForTrim(null);
@@ -4062,14 +4132,25 @@ export function VideoCreationForm({
               <TabsContent value="upload" className="mt-4">
                 <div className="space-y-4">
                   <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
-                    <label className="cursor-pointer">
+                    <label htmlFor="file-upload-input" className="cursor-pointer flex flex-col items-center gap-3">
                       <input
+                        id="file-upload-input"
                         type="file"
                         accept="image/*,video/*"
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file && replaceVideoSceneIndex !== null) {
+                          if (!file) {
+                            return;
+                          }
+                          
+                          if (replaceVideoSceneIndex === null) {
+                            console.error("No scene index selected for media upload");
+                            alert("Error: No scene selected. Please try again.");
+                            return;
+                          }
+                          
+                          try {
                             if (file.type.startsWith('video/')) {
                               // For video files, open trim dialog
                               const url = URL.createObjectURL(file);
@@ -4095,13 +4176,37 @@ export function VideoCreationForm({
                                 setIsReplaceVideoDialogOpen(false);
                                 setIsVideoTrimDialogOpen(true);
                               };
-                            } else {
+                              video.onerror = () => {
+                                console.error("Error loading video metadata");
+                                alert("Error loading video file. Please try again.");
+                              };
+                            } else if (file.type.startsWith('image/')) {
                               // For image files
-                            const url = URL.createObjectURL(file);
-                            const updated = [...scenesData];
+                              const url = URL.createObjectURL(file);
+                              const updated = [...scenesData];
                               if (isAddingMedia) {
                                 // Add to mediaItems array
-                                const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                                let currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                                
+                                // If mediaItems is empty but mediaUrl exists, create the first media item from template
+                                // This ensures the template image is preserved when adding new media
+                                if (currentMediaItems.length === 0) {
+                                  // Check if we have mediaUrl (template image) or need to create from thumbnail
+                                  const templateUrl = updated[replaceVideoSceneIndex].mediaUrl || updated[replaceVideoSceneIndex].thumbnail;
+                                  const templateType = updated[replaceVideoSceneIndex].mediaType || 'image';
+                                  
+                                  if (templateUrl) {
+                                    currentMediaItems = [{
+                                      id: `media-${updated[replaceVideoSceneIndex].id}-0`,
+                                      url: templateUrl,
+                                      type: templateType as 'image' | 'video',
+                                      thumbnail: updated[replaceVideoSceneIndex].thumbnail || templateUrl,
+                                      duration: templateType === 'image' ? '5s' : undefined,
+                                      videoDuration: templateType === 'video' ? (updated[replaceVideoSceneIndex].duration || undefined) : undefined,
+                                    }];
+                                  }
+                                }
+                                
                                 const newMediaItem: MediaItem = {
                                   id: `media-${updated[replaceVideoSceneIndex].id}-${Date.now()}`,
                                   url: url,
@@ -4116,34 +4221,111 @@ export function VideoCreationForm({
                                   activeMediaIndex: currentMediaItems.length, // Set as active
                                   duration: `${calculateTotalDuration(updatedMediaItems)}s`,
                                 };
-                              } else {
-                                // Replace existing media
-                            updated[replaceVideoSceneIndex] = {
-                              ...updated[replaceVideoSceneIndex],
-                              mediaUrl: url,
-                                  mediaType: 'image',
+                              } else if (replaceMediaIndex !== null) {
+                                // Replace specific media item (from 3-dots menu)
+                                const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                                const updatedMediaItems = [...currentMediaItems];
+                                updatedMediaItems[replaceMediaIndex] = {
+                                  ...updatedMediaItems[replaceMediaIndex],
+                                  url: url,
                                   thumbnail: url,
-                            };
+                                  type: 'image',
+                                  duration: updatedMediaItems[replaceMediaIndex].type === 'image' ? updatedMediaItems[replaceMediaIndex].duration : '5s',
+                                  videoDuration: undefined,
+                                };
+                                updated[replaceVideoSceneIndex] = {
+                                  ...updated[replaceVideoSceneIndex],
+                                  mediaItems: updatedMediaItems,
+                                  duration: `${calculateTotalDuration(updatedMediaItems)}s`,
+                                  // Update mediaUrl if replacing first item (template)
+                                  ...(replaceMediaIndex === 0 && {
+                                    mediaUrl: url,
+                                    mediaType: 'image',
+                                    thumbnail: url,
+                                  }),
+                                };
+                                setReplaceMediaIndex(null);
+                              } else {
+                                // Replace the first (template) media item
+                                const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                                if (currentMediaItems.length > 0) {
+                                  // Replace the first media item (template image)
+                                  const updatedMediaItems = [...currentMediaItems];
+                                  updatedMediaItems[0] = {
+                                    ...updatedMediaItems[0],
+                                    url: url,
+                                    thumbnail: url,
+                                    type: 'image',
+                                    duration: updatedMediaItems[0].type === 'image' ? updatedMediaItems[0].duration : '5s',
+                                    videoDuration: undefined,
+                                  };
+                                  updated[replaceVideoSceneIndex] = {
+                                    ...updated[replaceVideoSceneIndex],
+                                    mediaItems: updatedMediaItems,
+                                    mediaUrl: url, // Keep for backward compatibility
+                                    mediaType: 'image',
+                                    thumbnail: url,
+                                    duration: `${calculateTotalDuration(updatedMediaItems)}s`,
+                                  };
+                                } else {
+                                  // If no media items exist, create the first one
+                                  const newMediaItem: MediaItem = {
+                                    id: `media-${updated[replaceVideoSceneIndex].id}-0`,
+                                    url: url,
+                                    type: 'image',
+                                    thumbnail: url,
+                                    duration: '5s',
+                                  };
+                                  updated[replaceVideoSceneIndex] = {
+                                    ...updated[replaceVideoSceneIndex],
+                                    mediaItems: [newMediaItem],
+                                    mediaUrl: url,
+                                    mediaType: 'image',
+                                    thumbnail: url,
+                                    duration: '5s',
+                                    activeMediaIndex: 0,
+                                  };
+                                }
                               }
-                            setScenesData(updated);
-                            setIsReplaceVideoDialogOpen(false);
-                            setReplaceVideoSceneIndex(null);
+                              setScenesData(updated);
+                              setIsReplaceVideoDialogOpen(false);
+                              setReplaceVideoSceneIndex(null);
                               setIsAddingMedia(false);
                               setAddMediaSceneIndex(null);
+                              setReplaceMediaIndex(null);
+                            } else {
+                              alert("Please select an image or video file.");
+                            }
+                          } catch (error) {
+                            console.error("Error processing file:", error);
+                            alert("Error processing file. Please try again.");
+                          } finally {
+                            // Reset input to allow selecting the same file again
+                            if (e.target) {
+                              (e.target as HTMLInputElement).value = '';
                             }
                           }
                         }}
-                      />
-                      <div className="flex flex-col items-center gap-3">
-                        <Upload className="w-12 h-12 text-muted-foreground" />
-                        <div>
-                          <p className="text-sm font-medium">Click to upload or drag and drop</p>
-                          <p className="text-xs text-muted-foreground mt-1">Image or Video files</p>
+                        />
+                        <div className="flex flex-col items-center gap-3">
+                          <Upload className="w-12 h-12 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm font-medium">Click to upload or drag and drop</p>
+                            <p className="text-xs text-muted-foreground mt-1">Image or Video files</p>
+                          </div>
+                          <Button 
+                            type="button"
+                            variant="outline" 
+                            size="sm"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              document.getElementById('file-upload-input')?.click();
+                            }}
+                          >
+                            Select File
+                          </Button>
                         </div>
-                        <Button variant="outline" size="sm">
-                          Select File
-                        </Button>
-                      </div>
                     </label>
                   </div>
                 </div>
@@ -4830,13 +5012,37 @@ export function VideoCreationForm({
                       const updated = [...scenesData];
                         if (isAddingMedia) {
                           // Add to mediaItems array
-                          const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                          let currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                          
+                                // If mediaItems is empty, create the first media item from template (mediaUrl or thumbnail)
+                                // This ensures the template image is preserved when adding new media
+                                if (currentMediaItems.length === 0) {
+                                  const templateUrl = updated[replaceVideoSceneIndex].mediaUrl || updated[replaceVideoSceneIndex].thumbnail;
+                                  const templateType = updated[replaceVideoSceneIndex].mediaType || 'image';
+                                  
+                                  if (templateUrl) {
+                                    currentMediaItems = [{
+                                      id: `media-${updated[replaceVideoSceneIndex].id}-0`,
+                                      url: templateUrl,
+                                      type: templateType as 'image' | 'video',
+                                      thumbnail: updated[replaceVideoSceneIndex].thumbnail || templateUrl,
+                                      duration: templateType === 'image' ? '5s' : undefined,
+                                      videoDuration: templateType === 'video' ? (updated[replaceVideoSceneIndex].duration || undefined) : undefined,
+                                    }];
+                                  }
+                                }
+                          
+                          const startSeconds = parseTime(videoTrimStartTime);
+                          const endSeconds = parseTime(videoTrimEndTime);
+                          const clipDuration = Math.max(0, endSeconds - startSeconds);
+                          const clipDurationString = formatTime(clipDuration);
+                          
                           const newMediaItem: MediaItem = {
                             id: `media-${updated[replaceVideoSceneIndex].id}-${Date.now()}`,
                             url: videoUrl,
                             type: 'video',
                             thumbnail: selectedVideoForTrim.thumbnail,
-                            videoDuration: selectedVideoForTrim.duration,
+                            videoDuration: clipDurationString,
                           };
                           const updatedMediaItems = [...currentMediaItems, newMediaItem];
                       updated[replaceVideoSceneIndex] = {
@@ -4845,20 +5051,92 @@ export function VideoCreationForm({
                             activeMediaIndex: currentMediaItems.length, // Set as active
                             duration: `${calculateTotalDuration(updatedMediaItems)}s`,
                           };
-                        } else {
-                          // Replace existing media
+                        } else if (replaceMediaIndex !== null) {
+                          // Replace specific media item (from 3-dots menu)
+                          const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                          const updatedMediaItems = [...currentMediaItems];
+                          const startSeconds = parseTime(videoTrimStartTime);
+                          const endSeconds = parseTime(videoTrimEndTime);
+                          const clipDuration = Math.max(0, endSeconds - startSeconds);
+                          const clipDurationString = formatTime(clipDuration);
+                          
+                          updatedMediaItems[replaceMediaIndex] = {
+                            ...updatedMediaItems[replaceMediaIndex],
+                            url: videoUrl,
+                            thumbnail: selectedVideoForTrim.thumbnail,
+                            type: 'video',
+                            videoDuration: clipDurationString,
+                            duration: undefined,
+                          };
                           updated[replaceVideoSceneIndex] = {
                             ...updated[replaceVideoSceneIndex],
-                            mediaUrl: videoUrl,
-                        mediaType: 'video',
-                        thumbnail: selectedVideoForTrim.thumbnail,
-                      };
+                            mediaItems: updatedMediaItems,
+                            duration: `${calculateTotalDuration(updatedMediaItems)}s`,
+                            // Update mediaUrl if replacing first item (template)
+                            ...(replaceMediaIndex === 0 && {
+                              mediaUrl: videoUrl,
+                              mediaType: 'video',
+                              thumbnail: selectedVideoForTrim.thumbnail,
+                            }),
+                          };
+                        } else {
+                          // Replace the first (template) media item
+                          const currentMediaItems = updated[replaceVideoSceneIndex].mediaItems || [];
+                          if (currentMediaItems.length > 0) {
+                            // Replace the first media item (template image/video)
+                            const updatedMediaItems = [...currentMediaItems];
+                            const startSeconds = parseTime(videoTrimStartTime);
+                            const endSeconds = parseTime(videoTrimEndTime);
+                            const clipDuration = Math.max(0, endSeconds - startSeconds);
+                            const clipDurationString = formatTime(clipDuration);
+                            
+                            updatedMediaItems[0] = {
+                              ...updatedMediaItems[0],
+                              url: videoUrl,
+                              thumbnail: selectedVideoForTrim.thumbnail,
+                              type: 'video',
+                              videoDuration: clipDurationString,
+                              duration: undefined,
+                            };
+                            updated[replaceVideoSceneIndex] = {
+                              ...updated[replaceVideoSceneIndex],
+                              mediaItems: updatedMediaItems,
+                              mediaUrl: videoUrl, // Keep for backward compatibility
+                              mediaType: 'video',
+                              thumbnail: selectedVideoForTrim.thumbnail,
+                              duration: `${calculateTotalDuration(updatedMediaItems)}s`,
+                            };
+                          } else {
+                            // If no media items exist, create the first one
+                            const startSeconds = parseTime(videoTrimStartTime);
+                            const endSeconds = parseTime(videoTrimEndTime);
+                            const clipDuration = Math.max(0, endSeconds - startSeconds);
+                            const clipDurationString = formatTime(clipDuration);
+                            
+                            const newMediaItem: MediaItem = {
+                              id: `media-${updated[replaceVideoSceneIndex].id}-0`,
+                              url: videoUrl,
+                              type: 'video',
+                              thumbnail: selectedVideoForTrim.thumbnail,
+                              videoDuration: clipDurationString,
+                            };
+                            updated[replaceVideoSceneIndex] = {
+                              ...updated[replaceVideoSceneIndex],
+                              mediaItems: [newMediaItem],
+                              mediaUrl: videoUrl,
+                              mediaType: 'video',
+                              thumbnail: selectedVideoForTrim.thumbnail,
+                              duration: clipDurationString,
+                              activeMediaIndex: 0,
+                            };
+                          }
                         }
                       setScenesData(updated);
                       setIsVideoTrimDialogOpen(false);
                       setReplaceVideoSceneIndex(null);
                         setIsAddingMedia(false);
                         setAddMediaSceneIndex(null);
+                        setReplaceMediaIndex(null);
                       setSelectedVideoForTrim(null);
                       setVideoTrimStartTime("00:00");
                       setVideoTrimEndTime("00:00");
